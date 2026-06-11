@@ -648,29 +648,48 @@ function cams = openDinoLiteCameras(dllPath, sides)
     end
 
     %% 4) Kameras oeffnen, Fenster beschriften + platzieren --------------
+    % Vorab die Bildaufnahme zuruecksetzen: gibt evtl. verwaiste videoinput-
+    % Objekte aus frueheren (abgebrochenen) Laeufen frei, die das Geraet sonst
+    % blockieren -> sonst zeigt die Vorschau nur ein rotes Kreuz ("Geraet belegt").
+    try, imaqreset; pause(0.5); catch, end
+
     scr = get(0,'ScreenSize');
     wW  = scr(3)*0.46;  wH = wW*0.72;  yP = scr(4)*0.28;
     posBySide = struct('LINKS',  [scr(3)*0.02, yP, wW, wH], ...
                        'RECHTS', [scr(3)*0.52, yP, wW, wH]);
 
-    cams = struct('left', [], 'right', []);
-    for c = 1:numel(CONFIG)
-        vid = videoinput('winvideo', CONFIG(c).winvideo);
-        vid.FramesPerTrigger = 1;
-        triggerconfig(vid, 'manual');
+    % Bei einem Fehler waehrend des Oeffnens alle bereits erzeugten Objekte
+    % wieder freigeben, damit nichts verwaist zurueckbleibt.
+    cams    = struct('left', [], 'right', []);
+    opened  = [];
+    figs    = [];
+    try
+        for c = 1:numel(CONFIG)
+            vid = videoinput('winvideo', CONFIG(c).winvideo);
+            opened = [opened vid]; %#ok<AGROW>
+            vid.FramesPerTrigger = 1;
+            triggerconfig(vid, 'manual');
 
-        hFig = figure('Name', char(CONFIG(c).side), 'NumberTitle', 'off', ...
-                      'MenuBar', 'none', 'Position', posBySide.(CONFIG(c).side));
-        res = vid.VideoResolution;  nb = vid.NumberOfBands;
-        hAx = axes('Parent', hFig);
-        hIm = image(zeros(res(2), res(1), nb), 'Parent', hAx);
-        axis(hAx, 'image'); axis(hAx, 'off');
-        title(hAx, CONFIG(c).side, 'FontSize', 16, 'FontWeight', 'bold');
-        preview(vid, hIm);
+            hFig = figure('Name', char(CONFIG(c).side), 'NumberTitle', 'off', ...
+                          'MenuBar', 'none', 'Position', posBySide.(CONFIG(c).side));
+            figs = [figs hFig]; %#ok<AGROW>
+            res = vid.VideoResolution;  nb = vid.NumberOfBands;
+            hAx = axes('Parent', hFig);
+            hIm = image(zeros(res(2), res(1), nb), 'Parent', hAx);
+            axis(hAx, 'image'); axis(hAx, 'off');
+            title(hAx, CONFIG(c).side, 'FontSize', 16, 'FontWeight', 'bold');
+            preview(vid, hIm);
 
-        if CONFIG(c).side == "LINKS", cams.left = vid; else, cams.right = vid; end
-        fprintf("%-6s -> winvideo-ID %d (Port %s)\n", ...
-                CONFIG(c).side, CONFIG(c).winvideo, CONFIG(c).idaKey);
+            if CONFIG(c).side == "LINKS", cams.left = vid; else, cams.right = vid; end
+            fprintf("%-6s -> winvideo-ID %d (Port %s)\n", ...
+                    CONFIG(c).side, CONFIG(c).winvideo, CONFIG(c).idaKey);
+        end
+    catch ME
+        % Aufraeumen, damit keine belegten Geraete zurueckbleiben
+        try, stoppreview(opened); catch, end
+        try, delete(opened);      catch, end
+        try, delete(figs(ishghandle(figs))); catch, end
+        rethrow(ME);
     end
 
     %% 5) LEDs ausschalten (nach dem Stream-Start) ----------------------
