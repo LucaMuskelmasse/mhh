@@ -6,6 +6,11 @@ function bfrAufnahmeApp
 %   Kamerabild auf, sobald die Temperatur der jeweiligen Seite um mehr als
 %   den Deadband-Wert ueber den letzten Ausloesewert steigt.
 %
+%   Mit dem Umschaltknopf "Abkühlvorgang" (waehrend des Laufs) wird die
+%   Ausloesung umgedreht: Es wird ein Foto gemacht, sobald die Temperatur
+%   um mehr als den Deadband-Wert unter den letzten Ausloesewert FAELLT.
+%   Erneutes Druecken wechselt zurueck zum Aufwaermvorgang.
+%
 %   Ueber das Dropdown "Kameras" kann gewaehlt werden, ob nur die linke,
 %   nur die rechte oder beide Kameras verwendet werden. Es werden nur die
 %   gewaehlten Kameras geoeffnet, nur deren Unterordner angelegt und nur
@@ -27,6 +32,8 @@ prevR    = -Inf;        % letzter Ausloesewert rechts
 cntL     = 0;           % Bildzaehler links
 cntR     = 0;           % Bildzaehler rechts
 running  = false;       % Laufstatus
+cooling  = false;       % false = Aufwaermen (Ausloesung bei Anstieg),
+                        % true  = Abkuehlen (Ausloesung bei Abfall)
 
 % Zur Laufzeit eingefrorene Parameter (beim Start aus den Feldern gelesen)
 dbRun     = 0.2;
@@ -124,13 +131,18 @@ lockables = [edtCom, edtInt, edtDb, edtStopT, ddCams, edtBase, edtDatum, ...
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
-gC = uigridlayout(pnlCtrl, [1 5]);
-gC.ColumnWidth = {'1x','1x','fit',24,'fit'};
+gC = uigridlayout(pnlCtrl, [1 6]);
+gC.ColumnWidth = {'1x','1x','1x','fit',24,'fit'};
 
 btnStart = uibutton(gC, 'Text','Start', 'FontWeight','bold', ...
                     'ButtonPushedFcn', @onStart);
 btnStop  = uibutton(gC, 'Text','Stop', 'Enable','off', ...
                     'ButtonPushedFcn', @onStop);
+btnCool  = uibutton(gC, 'state', 'Text','Abkühlvorgang', 'Enable','off', ...
+                    'Tooltip',['Gedrueckt: Foto bei FALLENDER Temperatur ' ...
+                               '(Abkuehlvorgang). Erneut druecken: zurueck ' ...
+                               'zum Aufwaermvorgang.'], ...
+                    'ValueChangedFcn', @onCool);
 btnLed   = uibutton(gC, 'Text','LEDs aus', ...
                     'Tooltip','Dino-Lite-LEDs erneut ausschalten', ...
                     'ButtonPushedFcn', @(~,~) ledsOff(true));
@@ -312,9 +324,12 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             start(tmr);
 
             running        = true;
+            cooling        = false;                 % jeder Lauf beginnt als Aufwaermvorgang
+            btnCool.Value  = false;
+            btnCool.Enable = 'on';
             btnStop.Enable = 'on';
             lamp.Color     = [0 0.8 0];
-            lblState.Text  = 'läuft';
+            lblState.Text  = 'läuft (Aufwärmen)';
             logMsg(sprintf(['Lauf gestartet (Intervall %.2f s, Deadband %.2f °C, ' ...
                             'Stopp-Temp. %.1f °C, Kameras: %s).'], ...
                            intervall, dbRun, stopTrun, camLabel()));
@@ -325,8 +340,31 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             syncInlayFields();          % Inlay-Sichtbarkeit wiederherstellen
             btnStart.Enable = 'on';
             btnStop.Enable  = 'off';
+            btnCool.Enable  = 'off';
+            btnCool.Value   = false;
             lamp.Color      = [0.6 0.6 0.6];
             lblState.Text   = 'gestoppt';
+        end
+    end
+
+    % --------------------------------------------------- Abkuehl-/Aufwaerm-Modus ---
+    function onCool(~,~)
+        % Schaltet waehrend des Laufs zwischen Aufwaerm- und Abkuehlvorgang um.
+        % Beim Umschalten wird der Referenzwert so gesetzt, dass die naechste
+        % Messung ein Basisbild ausloest.
+        if ~running
+            btnCool.Value = false;
+            return;
+        end
+        cooling = logical(btnCool.Value);
+        if cooling
+            prevL = +Inf;  prevR = +Inf;
+            lblState.Text = 'läuft (Abkühlen)';
+            logMsg("Abkühlvorgang aktiviert — Foto bei fallender Temperatur.");
+        else
+            prevL = -Inf;  prevR = -Inf;
+            lblState.Text = 'läuft (Aufwärmen)';
+            logMsg("Aufwärmvorgang aktiviert — Foto bei steigender Temperatur.");
         end
     end
 
@@ -354,7 +392,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             if ~isnan(vals(2)), addpoints(lineR, tsec, vals(2)); end
 
             % --- Automatischer Stopp: BEIDE Kanaele >= Stopp-Temperatur ---
-            if vals(1) >= stopTrun && vals(2) >= stopTrun
+            % Gilt nur im Aufwaermvorgang — beim Abkuehlen liegen die Werte
+            % anfangs ueber der Schwelle und der Lauf soll weiterlaufen.
+            if ~cooling && vals(1) >= stopTrun && vals(2) >= stopTrun
                 drawnow limitrate;
                 logMsg(sprintf(['Stopp-Temperatur erreicht (L: %.1f %s, ' ...
                     'R: %.1f %s >= %.1f °C) — Lauf wird automatisch gestoppt.'], ...
@@ -363,8 +403,17 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 return;
             end
 
-            % --- Ausloeselogik links: nur wenn aktiv und Anstieg > Deadband ---
-            if useL && vals(1) > prevL + dbRun
+            % --- Ausloeselogik: Aufwaermen -> Anstieg > Deadband,
+            %     Abkuehlen -> Abfall > Deadband (jeweils nur aktive Seiten) ---
+            if cooling
+                trigL = vals(1) < prevL - dbRun;
+                trigR = vals(2) < prevR - dbRun;
+            else
+                trigL = vals(1) > prevL + dbRun;
+                trigR = vals(2) > prevR + dbRun;
+            end
+
+            if useL && trigL
                 captureSingleFrameSide(cams.left, dirLrun, t0, prefixRun, vals(1), "L");
                 cntL = cntL + 1;
                 lblCntL.Text = num2str(cntL);
@@ -372,8 +421,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 prevL = vals(1);            % nur bei Ausloesung aktualisieren
             end
 
-            % --- Ausloeselogik rechts (analog) ---
-            if useR && vals(2) > prevR + dbRun
+            if useR && trigR
                 captureSingleFrameSide(cams.right, dirRrun, t0, prefixRun, vals(2), "R");
                 cntR = cntR + 1;
                 lblCntR.Text = num2str(cntR);
@@ -393,10 +441,13 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         logMsg("Stoppe Lauf …");
         cleanupResources();
         running         = false;
+        cooling         = false;
         set(lockables, 'Enable', 'on');
         syncInlayFields();          % Inlay-Sichtbarkeit wiederherstellen
         btnStart.Enable = 'on';
         btnStop.Enable  = 'off';
+        btnCool.Enable  = 'off';
+        btnCool.Value   = false;
         lamp.Color      = [0.6 0.6 0.6];
         lblState.Text   = 'gestoppt';
         logMsg(sprintf("Lauf beendet. Bilder links: %d, rechts: %d.", cntL, cntR));
