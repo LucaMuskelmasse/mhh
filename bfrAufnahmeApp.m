@@ -201,6 +201,72 @@ txtLog = uitextarea(gMain, 'Editable','off', 'Value',{''});
 txtLog.Layout.Row    = 2;
 txtLog.Layout.Column = [1 2];
 
+%% ============================ Dark-Mode-Styling =================================
+% Zentrale Farbpalette — alle Farben der App an einer Stelle.
+C = struct( ...
+    'bg',      [0.11 0.11 0.13], ...   % Fensterhintergrund
+    'panel',   [0.15 0.15 0.18], ...   % Panels / Karten
+    'field',   [0.20 0.20 0.24], ...   % Eingabefelder / Buttons
+    'border',  [0.32 0.32 0.38], ...   % Rahmen / Gitterlinien
+    'text',    [0.91 0.91 0.93], ...   % Standardtext
+    'subtle',  [0.62 0.62 0.68], ...   % Sekundaertext / Achsen
+    'accentL', [0.38 0.69 1.00], ...   % Akzent links (blau)
+    'accentR', [1.00 0.58 0.28], ...   % Akzent rechts (orange)
+    'start',   [0.13 0.38 0.22], ...   % Start-Button (gruen)
+    'stop',    [0.45 0.17 0.17]);      % Stop-Button (rot)
+
+fig.Color = C.bg;
+
+% Layout-Raster: Hintergruende + etwas Luft zwischen den Elementen
+set([gMain gLeft gRight], 'BackgroundColor', C.bg);
+set([gP gC gZ],           'BackgroundColor', C.panel);
+gMain.Padding   = [10 10 10 10];
+gMain.RowSpacing = 10;  gMain.ColumnSpacing = 10;
+gLeft.RowSpacing = 10;
+gRight.RowSpacing = 8;  gRight.ColumnSpacing = 8;
+
+% Panels (Titelzeile hell auf dunkel)
+set(findall(fig, 'Type','uipanel'), 'BackgroundColor', C.panel, ...
+    'ForegroundColor', C.text, 'FontWeight', 'bold');
+
+% Beschriftungen, Eingabefelder, Auswahl, Buttons
+set(findall(fig, 'Type','uilabel'),            'FontColor', C.text);
+set(findall(fig, 'Type','uieditfield'),        'BackgroundColor', C.field, 'FontColor', C.text);
+set(findall(fig, 'Type','uinumericeditfield'), 'BackgroundColor', C.field, 'FontColor', C.text);
+set(findall(fig, 'Type','uidropdown'),         'BackgroundColor', C.field, 'FontColor', C.text);
+set(findall(fig, 'Type','uicheckbox'),         'FontColor', C.text);
+set(findall(fig, 'Type','uibutton'),           'BackgroundColor', C.field, 'FontColor', C.text);
+set(findall(fig, 'Type','uistatebutton'),      'BackgroundColor', C.field, 'FontColor', C.text);
+
+% Akzente: Start gruen, Stop rot, Temperaturen in den Plot-Farben
+btnStart.BackgroundColor = C.start;
+btnStop.BackgroundColor  = C.stop;
+lblTL.FontColor = C.accentL;
+lblTR.FontColor = C.accentR;
+lblState.FontColor = C.subtle;
+
+% Achsen (Kameravorschau + Live-Plot)
+for ax = [axCamL axCamR axPlot]
+    ax.Color       = C.panel;
+    ax.XColor      = C.subtle;
+    ax.YColor      = C.subtle;
+    ax.GridColor   = C.border;
+    ax.Title.Color = C.text;
+end
+axPlot.XLabel.Color = C.subtle;
+axPlot.YLabel.Color = C.subtle;
+lineL.Color = C.accentL;
+lineR.Color = C.accentR;
+lgd = legend(axPlot);
+lgd.TextColor = C.text;
+lgd.Color     = C.panel;
+lgd.EdgeColor = C.border;
+
+% Status-Log als dunkle "Konsole" mit Monospace-Schrift
+txtLog.BackgroundColor = [0.08 0.08 0.10];
+txtLog.FontColor       = [0.78 0.84 0.78];
+txtLog.FontName        = 'Consolas';
+
 logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 
 %% ================================ Callbacks =====================================
@@ -736,13 +802,15 @@ function cams = openDinoLiteCameras(dllPath, sides)
             triggerconfig(vid, 'manual');
 
             hFig = figure('Name', char(CONFIG(c).side), 'NumberTitle', 'off', ...
-                          'MenuBar', 'none', 'Position', posBySide.(CONFIG(c).side));
+                          'MenuBar', 'none', 'Position', posBySide.(CONFIG(c).side), ...
+                          'Color', [0.11 0.11 0.13]);
             figs = [figs hFig]; %#ok<AGROW>
             res = vid.VideoResolution;  nb = vid.NumberOfBands;
             hAx = axes('Parent', hFig);
             hIm = image(zeros(res(2), res(1), nb), 'Parent', hAx);
             axis(hAx, 'image'); axis(hAx, 'off');
-            title(hAx, CONFIG(c).side, 'FontSize', 16, 'FontWeight', 'bold');
+            title(hAx, CONFIG(c).side, 'FontSize', 16, 'FontWeight', 'bold', ...
+                  'Color', [0.91 0.91 0.93]);
             preview(vid, hIm);
 
             if CONFIG(c).side == "LINKS", cams.left = vid; else, cams.right = vid; end
