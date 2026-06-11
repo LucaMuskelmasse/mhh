@@ -42,7 +42,8 @@ dirRrun   = "";
 prefixRun = "";
 useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
-stopTrun  = 70;         % Stopp-Temperatur: Lauf endet, wenn BEIDE Kanaele >= Wert
+stopTrun  = 70;         % Stopp-Temperatur Aufwaermen: Ende, wenn BEIDE Kanaele >= Wert
+stopCrun  = 37;         % Stopp-Temperatur Abkuehlen:  Ende, wenn BEIDE Kanaele <= Wert
 
 %% ================================ UI-Aufbau =====================================
 fig = uifigure('Name','BFR-Versuch — Aufnahmesteuerung', ...
@@ -62,9 +63,9 @@ gLeft.Padding       = [0 0 0 0];
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [12 3]);
+gP = uigridlayout(pnlParam, [13 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 12);
+gP.RowHeight   = repmat({'fit'}, 1, 13);
 
 uilabel(gP, 'Text','COM-Port:');
 edtCom = uieditfield(gP, 'text', 'Value','COM4');
@@ -79,10 +80,17 @@ uilabel(gP, 'Text','Deadband [°C]:');
 edtDb = uieditfield(gP, 'numeric', 'Value',0.2, 'Limits',[0 Inf]);
 edtDb.Layout.Column = [2 3];
 
-uilabel(gP, 'Text','Stopp-Temp. [°C]:');
+uilabel(gP, 'Text','Stopp Aufw. [°C]:');
 edtStopT = uieditfield(gP, 'numeric', 'Value',70, ...
-    'Tooltip','Lauf stoppt automatisch, wenn BEIDE Kanaele diesen Wert erreichen.');
+    'Tooltip',['Aufwaermvorgang: Lauf stoppt automatisch, wenn BEIDE ' ...
+               'Kanaele >= diesem Wert sind.']);
 edtStopT.Layout.Column = [2 3];
+
+uilabel(gP, 'Text','Stopp Abk. [°C]:');
+edtStopC = uieditfield(gP, 'numeric', 'Value',37, ...
+    'Tooltip',['Abkuehlvorgang: Lauf stoppt automatisch, wenn BEIDE ' ...
+               'Kanaele <= diesem Wert sind.']);
+edtStopC.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Kameras:');
 ddCams = uidropdown(gP, ...
@@ -126,8 +134,9 @@ edtPrefix = uieditfield(gP, 'text', ...
 edtPrefix.Layout.Column = [2 3];
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
-lockables = [edtCom, edtInt, edtDb, edtStopT, ddCams, edtBase, edtDatum, ...
-             edtInlay1, edtInlay2, chkFM, chkSpiral, edtPrefix, btnBrowseBase];
+lockables = [edtCom, edtInt, edtDb, edtStopT, edtStopC, ddCams, edtBase, ...
+             edtDatum, edtInlay1, edtInlay2, chkFM, chkSpiral, edtPrefix, ...
+             btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -219,6 +228,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             intervall = edtInt.Value;
             dbRun     = edtDb.Value;
             stopTrun  = edtStopT.Value;
+            stopCrun  = edtStopC.Value;
             baseDir   = strtrim(string(edtBase.Value));
             datum     = strtrim(string(edtDatum.Value));
             inlay1    = regexprep(strtrim(string(edtInlay1.Value)), '^(MV|mv)', '');
@@ -331,8 +341,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             lamp.Color     = [0 0.8 0];
             lblState.Text  = 'läuft (Aufwärmen)';
             logMsg(sprintf(['Lauf gestartet (Intervall %.2f s, Deadband %.2f °C, ' ...
-                            'Stopp-Temp. %.1f °C, Kameras: %s).'], ...
-                           intervall, dbRun, stopTrun, camLabel()));
+                            'Stopp Aufw. %.1f °C, Stopp Abk. %.1f °C, Kameras: %s).'], ...
+                           intervall, dbRun, stopTrun, stopCrun, camLabel()));
         catch ME
             logMsg("Start fehlgeschlagen: " + string(ME.message));
             cleanupResources();
@@ -391,14 +401,21 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             if ~isnan(vals(1)), addpoints(lineL, tsec, vals(1)); end
             if ~isnan(vals(2)), addpoints(lineR, tsec, vals(2)); end
 
-            % --- Automatischer Stopp: BEIDE Kanaele >= Stopp-Temperatur ---
-            % Gilt nur im Aufwaermvorgang — beim Abkuehlen liegen die Werte
-            % anfangs ueber der Schwelle und der Lauf soll weiterlaufen.
+            % --- Automatischer Stopp, je nach Modus ---
+            % Aufwaermen: BEIDE Kanaele >= Stopp Aufw.  |  Abkuehlen: BEIDE <= Stopp Abk.
             if ~cooling && vals(1) >= stopTrun && vals(2) >= stopTrun
                 drawnow limitrate;
-                logMsg(sprintf(['Stopp-Temperatur erreicht (L: %.1f %s, ' ...
+                logMsg(sprintf(['Stopp-Temperatur Aufwaermen erreicht (L: %.1f %s, ' ...
                     'R: %.1f %s >= %.1f °C) — Lauf wird automatisch gestoppt.'], ...
                     vals(1), uL, vals(2), uR, stopTrun));
+                onStop();
+                return;
+            end
+            if cooling && vals(1) <= stopCrun && vals(2) <= stopCrun
+                drawnow limitrate;
+                logMsg(sprintf(['Stopp-Temperatur Abkuehlen erreicht (L: %.1f %s, ' ...
+                    'R: %.1f %s <= %.1f °C) — Lauf wird automatisch gestoppt.'], ...
+                    vals(1), uL, vals(2), uR, stopCrun));
                 onStop();
                 return;
             end
