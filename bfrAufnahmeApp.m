@@ -73,10 +73,11 @@ edtDb.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Kameras:');
 ddCams = uidropdown(gP, ...
-    'Items',     {'Beide','Nur links','Nur rechts'}, ...
-    'ItemsData', {'beide','links','rechts'}, ...
-    'Value',     'beide', ...
-    'Tooltip',   'Welche Kamera(s) sollen in diesem Lauf aufnehmen?');
+    'Items',         {'Beide','Nur links','Nur rechts'}, ...
+    'ItemsData',     {'beide','links','rechts'}, ...
+    'Value',         'beide', ...
+    'Tooltip',       'Welche Kamera(s) sollen in diesem Lauf aufnehmen?', ...
+    'ValueChangedFcn', @(~,~) syncInlayFields());
 ddCams.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Basisordner:');
@@ -90,13 +91,16 @@ edtDatum = uieditfield(gP, 'text', ...
     'Tooltip','Format YYYY-MM-DD');
 edtDatum.Layout.Column = [2 3];
 
-uilabel(gP, 'Text','Inlay 1:');
+lblInlay1 = uilabel(gP, 'Text','Inlay 1 (links):');
 edtInlay1 = uieditfield(gP, 'text', 'Placeholder','xx-xx');
 edtInlay1.Layout.Column = [2 3];
 
-uilabel(gP, 'Text','Inlay 2:');
+lblInlay2 = uilabel(gP, 'Text','Inlay 2 (rechts):');
 edtInlay2 = uieditfield(gP, 'text', 'Placeholder','xx-xx');
 edtInlay2.Layout.Column = [2 3];
+
+% Inlay-Felder passend zur Kameraauswahl ein-/ausblenden (Initialzustand)
+syncInlayFields();
 
 chkFM = uicheckbox(gP, 'Text','Funktionsmuster (-FM)');
 chkFM.Layout.Column = [1 3];
@@ -212,13 +216,22 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             assert(strlength(baseDir) > 0, "Basisordner darf nicht leer sein.");
             assert(~isempty(regexp(datum, '^\d{4}-\d{2}-\d{2}$', 'once')), ...
                    "Datum bitte im Format YYYY-MM-DD angeben.");
-            assert(strlength(inlay1)  > 0, "Kennnummer Inlay 1 darf nicht leer sein.");
-            assert(strlength(inlay2)  > 0, "Kennnummer Inlay 2 darf nicht leer sein.");
+            % Nur die Inlays der aktiven Seite(n) sind Pflicht
+            if useL
+                assert(strlength(inlay1) > 0, "Kennnummer Inlay 1 (links) darf nicht leer sein.");
+            end
+            if useR
+                assert(strlength(inlay2) > 0, "Kennnummer Inlay 2 (rechts) darf nicht leer sein.");
+            end
             assert(strlength(prefixRun) > 0, "Datums-Praefix darf nicht leer sein.");
 
             % --- Versuchsordner nach festem Namensschema zusammensetzen ---
-            % <Datum>-MV<Inlay1>-MV<Inlay2>[-FM][-s]
-            name = datum + "-MV" + inlay1 + "-MV" + inlay2;
+            % beide : <Datum>-MV<Inlay1>-MV<Inlay2>[-FM][-s]
+            % links : <Datum>-MV<Inlay1>[-FM][-s]
+            % rechts: <Datum>-MV<Inlay2>[-FM][-s]
+            name = datum;
+            if useL, name = name + "-MV" + inlay1; end
+            if useR, name = name + "-MV" + inlay2; end
             if chkFM.Value,     name = name + "-FM"; end
             if chkSpiral.Value, name = name + "-s";  end
             ordner = string(fullfile(baseDir, name));
@@ -301,6 +314,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             logMsg("Start fehlgeschlagen: " + string(ME.message));
             cleanupResources();
             set(lockables, 'Enable', 'on');
+            syncInlayFields();          % Inlay-Sichtbarkeit wiederherstellen
             btnStart.Enable = 'on';
             btnStop.Enable  = 'off';
             lamp.Color      = [0.6 0.6 0.6];
@@ -362,6 +376,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         cleanupResources();
         running         = false;
         set(lockables, 'Enable', 'on');
+        syncInlayFields();          % Inlay-Sichtbarkeit wiederherstellen
         btnStart.Enable = 'on';
         btnStop.Enable  = 'off';
         lamp.Color      = [0.6 0.6 0.6];
@@ -380,6 +395,26 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
 %% ============================== Hilfsfunktionen ==================================
+
+    function syncInlayFields()
+        % Blendet die Inlay-Eingabefelder passend zur Kameraauswahl ein/aus.
+        % Nur links  -> nur Inlay 1; nur rechts -> nur Inlay 2; beide -> beide.
+        camSel = string(ddCams.Value);     % "beide" | "links" | "rechts"
+        wantL  = camSel ~= "rechts";
+        wantR  = camSel ~= "links";
+        setInlay(lblInlay1, edtInlay1, wantL);
+        setInlay(lblInlay2, edtInlay2, wantR);
+    end
+
+    function setInlay(lbl, edt, on)
+        % Ein einzelnes Inlay-Feld samt Label aktivieren/deaktivieren.
+        if on
+            lbl.Enable = 'on';  edt.Enable = 'on';
+        else
+            edt.Value  = '';            % deaktiviertes Feld leeren
+            lbl.Enable = 'off'; edt.Enable = 'off';
+        end
+    end
 
     function lbl = camLabel()
         % Lesbare Beschreibung der aktuellen Kameraauswahl fuers Log / Dialoge
