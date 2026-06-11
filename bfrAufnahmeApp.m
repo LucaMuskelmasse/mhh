@@ -285,31 +285,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             logMsg("Oeffne Dino-Lite-Kamera(s): " + camLabel() + " …");
             cams = openDinoLiteCameras("DNX64.dll", sides);
 
-            % Live-Vorschau direkt in der GUI starten (keine externen Fenster)
+            % Externe Vorschaufenster schliessen und Streams in die App umleiten
             attachPreviews();
-
-            % --- Scharfstellung in der GUI bestaetigen (Vorschau laeuft bereits) ---
-            if useL && useR
-                frage = "Sind beide Kameras scharf gestellt?";
-            elseif useL
-                frage = "Ist die linke Kamera scharf gestellt?";
-            else
-                frage = "Ist die rechte Kamera scharf gestellt?";
-            end
-            selF = uiconfirm(fig, frage, "Scharfstellung", ...
-                'Options',{'OK — Aufnahme starten','Abbrechen'}, ...
-                'DefaultOption',1, 'CancelOption',2);
-            if ~strcmp(selF, 'OK — Aufnahme starten')
-                logMsg("Start abgebrochen (Scharfstellung nicht bestaetigt).");
-                cleanupResources();
-                set(lockables, 'Enable', 'on');
-                syncInlayFields();
-                btnStart.Enable = 'on';
-                btnStop.Enable  = 'off';
-                lamp.Color      = [0.6 0.6 0.6];
-                lblState.Text   = 'gestoppt';
-                return;
-            end
 
             % --- Laufzustand initialisieren ---
             t0    = datetime('now');
@@ -459,9 +436,14 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function attachPreviews()
-        % Startet die Live-Vorschau der aktiven Kameras direkt in den
-        % App-Achsen und markiert die Achsen inaktiver Seiten.
-        stoppreview(activeCams());     % falls bereits eine Vorschau laeuft
+        % Leitet die Live-Vorschau der aktiven Kameras in die App-Achsen um,
+        % schliesst die von openDinoLiteCameras erzeugten externen Fenster und
+        % markiert die Achsen inaktiver Seiten.
+        stoppreview(activeCams());
+        for nm = ["LINKS","RECHTS"]
+            fOld = findall(0, 'Type','figure', 'Name',char(nm));
+            delete(fOld);
+        end
         if useL
             hImL = makePreviewImage(axCamL, cams.left);
             preview(cams.left, hImL);      % fluessiger Stream, getrennt vom
@@ -582,10 +564,10 @@ end % ================================ Ende App ================================
 
 function cams = openDinoLiteCameras(dllPath, sides)
 % OPENDINOLITECAMERAS  Oeffnet die gewuenschten Dino-Lite-Kameras mit fester
-% Links/Rechts-Zuordnung ueber den USB-Portpfad und schaltet die LEDs aus.
-% Es werden KEINE eigenen Vorschaufenster geoeffnet und es wird NICHT auf die
-% Scharfstellung gewartet — die Live-Vorschau und die Bestaetigung uebernimmt
-% die aufrufende App direkt in ihren GUI-Achsen.
+% Links/Rechts-Zuordnung ueber den USB-Portpfad, beschriftet die Vorschau-
+% fenster mit LINKS / RECHTS und schaltet die LEDs aus. Die Funktion kehrt
+% erst zurueck, nachdem die Scharfstellung im OK-Fenster bestaetigt wurde
+% (die Vorschauen laufen waehrend des Wartens weiter).
 %
 %   cams = openDinoLiteCameras()                          % beide Kameras
 %   cams = openDinoLiteCameras("DNX64.dll")               % beide Kameras
@@ -647,26 +629,69 @@ function cams = openDinoLiteCameras(dllPath, sides)
                'vertauscht werden.'], strjoin(cfgKeys,", "), strjoin(keys,", "));
     end
 
-    %% 4) Kameras oeffnen + konfigurieren (ohne eigene Fenster/Vorschau) -
-    % Die Live-Vorschau und die Bestaetigung der Scharfstellung uebernimmt
-    % die App direkt in ihren GUI-Achsen (siehe attachPreviews/onStart).
+    %% 4) Kameras oeffnen, Fenster beschriften + platzieren --------------
+    scr = get(0,'ScreenSize');
+    wW  = scr(3)*0.46;  wH = wW*0.72;  yP = scr(4)*0.28;
+    posBySide = struct('LINKS',  [scr(3)*0.02, yP, wW, wH], ...
+                       'RECHTS', [scr(3)*0.52, yP, wW, wH]);
+
     cams = struct('left', [], 'right', []);
     for c = 1:numel(CONFIG)
         vid = videoinput('winvideo', CONFIG(c).winvideo);
         vid.FramesPerTrigger = 1;
         triggerconfig(vid, 'manual');
 
+        hFig = figure('Name', char(CONFIG(c).side), 'NumberTitle', 'off', ...
+                      'MenuBar', 'none', 'Position', posBySide.(CONFIG(c).side));
+        res = vid.VideoResolution;  nb = vid.NumberOfBands;
+        hAx = axes('Parent', hFig);
+        hIm = image(zeros(res(2), res(1), nb), 'Parent', hAx);
+        axis(hAx, 'image'); axis(hAx, 'off');
+        title(hAx, CONFIG(c).side, 'FontSize', 16, 'FontWeight', 'bold');
+        preview(vid, hIm);
+
         if CONFIG(c).side == "LINKS", cams.left = vid; else, cams.right = vid; end
         fprintf("%-6s -> winvideo-ID %d (Port %s)\n", ...
                 CONFIG(c).side, CONFIG(c).winvideo, CONFIG(c).idaKey);
     end
 
-    %% 5) LEDs ausschalten ----------------------------------------------
+    %% 5) LEDs ausschalten (nach dem Stream-Start) ----------------------
     for idx = 0:nDnx-1
         calllib('DNX64','SetVideoDeviceIndex', idx); pause(0.1);
         calllib('DNX64','SetLEDState', idx, 0);      pause(0.1);   % 0 = aus
     end
-    fprintf("LEDs aus.\n");
+    fprintf("LEDs aus. Bitte in den Fenstern pruefen, ob die Zuordnung stimmt.\n");
+
+    %% 6) Auf Scharfstellung warten - haelt die Vorschauen aktiv --------
+    pause(0.5); drawnow;
+    fprintf("\nWarte auf Bestaetigung der Scharfstellung...\n");
+    if numel(CONFIG) == 1
+        frage = sprintf('Ist die Kamera %s scharf gestellt?', CONFIG(1).side);
+    else
+        frage = 'Sind beide Kameras scharf gestellt?';
+    end
+    bestaetigt = false;
+    hWait = figure('Name','Scharfstellung', 'NumberTitle','off', ...
+                   'MenuBar','none', 'Resize','off', ...
+                   'Position',[scr(3)*0.40, scr(4)*0.46, 280, 130]);
+    uicontrol('Parent',hWait, 'Style','text', 'FontSize',11, ...
+              'Units','normalized', 'Position',[0.08 0.5 0.84 0.35], ...
+              'String',frage);
+    uicontrol('Parent',hWait, 'Style','pushbutton', 'FontSize',11, ...
+              'Units','normalized', 'Position',[0.30 0.12 0.40 0.28], ...
+              'String','OK - weiter', 'Callback',@onOK);
+
+    while ~bestaetigt && ishghandle(hWait)
+        drawnow limitrate;     % haelt die Live-Vorschauen am Laufen
+        pause(0.03);
+    end
+    if ishghandle(hWait), delete(hWait); end
+    fprintf("Weiter geht's.\n");
+
+    % --- verschachtelte Funktion: OK-Knopf ---
+    function onOK(~,~)
+        bestaetigt = true;
+    end
 end
 
 % ----------------------------------------------------------------------
