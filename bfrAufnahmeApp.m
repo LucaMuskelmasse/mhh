@@ -3,12 +3,13 @@ function bfrAufnahmeApp
 %
 %   Liest zyklisch (timer-basiert, nicht blockierend) die Temperatur beider
 %   Kanaele des Omega HH806AWE aus und nimmt pro Seite getrennt ein
-%   Kamerabild auf, sobald die Temperatur der jeweiligen Seite um mehr als
-%   den Deadband-Wert ueber den letzten Ausloesewert steigt.
+%   Kamerabild auf, sobald die Temperatur der jeweiligen Seite ueber den
+%   letzten Ausloesewert steigt (Geraeteaufloesung 0.1 °C -> ein Bild je
+%   0.1-Grad-Schritt).
 %
 %   Mit dem Umschaltknopf "Abkühlvorgang" (waehrend des Laufs) wird die
 %   Ausloesung umgedreht: Es wird ein Foto gemacht, sobald die Temperatur
-%   um mehr als den Deadband-Wert unter den letzten Ausloesewert FAELLT.
+%   unter den letzten Ausloesewert FAELLT.
 %   Erneutes Druecken wechselt zurueck zum Aufwaermvorgang.
 %
 %   Ueber das Dropdown "Kameras" kann gewaehlt werden, ob nur die linke,
@@ -36,7 +37,6 @@ cooling  = false;       % false = Aufwaermen (Ausloesung bei Anstieg),
                         % true  = Abkuehlen (Ausloesung bei Abfall)
 
 % Zur Laufzeit eingefrorene Parameter (beim Start aus den Feldern gelesen)
-dbRun     = 0.2;
 dirLrun   = "";
 dirRrun   = "";
 prefixRun = "";
@@ -63,9 +63,9 @@ gLeft.Padding       = [0 0 0 0];
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [13 3]);
+gP = uigridlayout(pnlParam, [12 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 13);
+gP.RowHeight   = repmat({'fit'}, 1, 12);
 
 uilabel(gP, 'Text','COM-Port:');
 edtCom = uieditfield(gP, 'text', 'Value','COM4');
@@ -75,10 +75,6 @@ uilabel(gP, 'Text','Intervall [s]:');
 edtInt = uieditfield(gP, 'numeric', 'Value',1.0, ...
                      'Limits',[0.05 Inf], 'LowerLimitInclusive','on');
 edtInt.Layout.Column = [2 3];
-
-uilabel(gP, 'Text','Deadband [°C]:');
-edtDb = uieditfield(gP, 'numeric', 'Value',0.2, 'Limits',[0 Inf]);
-edtDb.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Stopp Aufw. [°C]:');
 edtStopT = uieditfield(gP, 'numeric', 'Value',70, ...
@@ -134,7 +130,7 @@ edtPrefix = uieditfield(gP, 'text', ...
 edtPrefix.Layout.Column = [2 3];
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
-lockables = [edtCom, edtInt, edtDb, edtStopT, edtStopC, ddCams, edtBase, ...
+lockables = [edtCom, edtInt, edtStopT, edtStopC, ddCams, edtBase, ...
              edtDatum, edtInlay1, edtInlay2, chkFM, chkSpiral, edtPrefix, ...
              btnBrowseBase];
 
@@ -226,7 +222,6 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             % --- Parameter aus den Feldern lesen und validieren ---
             port      = strtrim(string(edtCom.Value));
             intervall = edtInt.Value;
-            dbRun     = edtDb.Value;
             stopTrun  = edtStopT.Value;
             stopCrun  = edtStopC.Value;
             baseDir   = strtrim(string(edtBase.Value));
@@ -340,9 +335,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             btnStop.Enable = 'on';
             lamp.Color     = [0 0.8 0];
             lblState.Text  = 'läuft (Aufwärmen)';
-            logMsg(sprintf(['Lauf gestartet (Intervall %.2f s, Deadband %.2f °C, ' ...
+            logMsg(sprintf(['Lauf gestartet (Intervall %.2f s, ' ...
                             'Stopp Aufw. %.1f °C, Stopp Abk. %.1f °C, Kameras: %s).'], ...
-                           intervall, dbRun, stopTrun, stopCrun, camLabel()));
+                           intervall, stopTrun, stopCrun, camLabel()));
         catch ME
             logMsg("Start fehlgeschlagen: " + string(ME.message));
             cleanupResources();
@@ -420,14 +415,16 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 return;
             end
 
-            % --- Ausloeselogik: Aufwaermen -> Anstieg > Deadband,
-            %     Abkuehlen -> Abfall > Deadband (jeweils nur aktive Seiten) ---
+            % --- Ausloeselogik: Aufwaermen -> jeder Anstieg ueber den letzten
+            %     Ausloesewert, Abkuehlen -> jeder Abfall darunter. Bei der
+            %     Geraeteaufloesung von 0.1 °C ergibt das ein Bild je
+            %     0.1-Grad-Schritt (jeweils nur aktive Seiten). ---
             if cooling
-                trigL = vals(1) < prevL - dbRun;
-                trigR = vals(2) < prevR - dbRun;
+                trigL = vals(1) < prevL;
+                trigR = vals(2) < prevR;
             else
-                trigL = vals(1) > prevL + dbRun;
-                trigR = vals(2) > prevR + dbRun;
+                trigL = vals(1) > prevL;
+                trigR = vals(2) > prevR;
             end
 
             if useL && trigL
