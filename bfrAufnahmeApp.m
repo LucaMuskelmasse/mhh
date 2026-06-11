@@ -35,6 +35,7 @@ dirRrun   = "";
 prefixRun = "";
 useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
+stopTrun  = 70;         % Stopp-Temperatur: Lauf endet, wenn BEIDE Kanaele >= Wert
 
 %% ================================ UI-Aufbau =====================================
 fig = uifigure('Name','BFR-Versuch — Aufnahmesteuerung', ...
@@ -54,9 +55,9 @@ gLeft.Padding       = [0 0 0 0];
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [11 3]);
+gP = uigridlayout(pnlParam, [12 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 11);
+gP.RowHeight   = repmat({'fit'}, 1, 12);
 
 uilabel(gP, 'Text','COM-Port:');
 edtCom = uieditfield(gP, 'text', 'Value','COM4');
@@ -70,6 +71,11 @@ edtInt.Layout.Column = [2 3];
 uilabel(gP, 'Text','Deadband [°C]:');
 edtDb = uieditfield(gP, 'numeric', 'Value',0.2, 'Limits',[0 Inf]);
 edtDb.Layout.Column = [2 3];
+
+uilabel(gP, 'Text','Stopp-Temp. [°C]:');
+edtStopT = uieditfield(gP, 'numeric', 'Value',70, ...
+    'Tooltip','Lauf stoppt automatisch, wenn BEIDE Kanaele diesen Wert erreichen.');
+edtStopT.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Kameras:');
 ddCams = uidropdown(gP, ...
@@ -113,8 +119,8 @@ edtPrefix = uieditfield(gP, 'text', ...
 edtPrefix.Layout.Column = [2 3];
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
-lockables = [edtCom, edtInt, edtDb, ddCams, edtBase, edtDatum, edtInlay1, ...
-             edtInlay2, chkFM, chkSpiral, edtPrefix, btnBrowseBase];
+lockables = [edtCom, edtInt, edtDb, edtStopT, ddCams, edtBase, edtDatum, ...
+             edtInlay1, edtInlay2, chkFM, chkSpiral, edtPrefix, btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -200,6 +206,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             port      = strtrim(string(edtCom.Value));
             intervall = edtInt.Value;
             dbRun     = edtDb.Value;
+            stopTrun  = edtStopT.Value;
             baseDir   = strtrim(string(edtBase.Value));
             datum     = strtrim(string(edtDatum.Value));
             inlay1    = regexprep(strtrim(string(edtInlay1.Value)), '^(MV|mv)', '');
@@ -308,8 +315,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             btnStop.Enable = 'on';
             lamp.Color     = [0 0.8 0];
             lblState.Text  = 'läuft';
-            logMsg(sprintf("Lauf gestartet (Intervall %.2f s, Deadband %.2f °C, Kameras: %s).", ...
-                           intervall, dbRun, camLabel()));
+            logMsg(sprintf(['Lauf gestartet (Intervall %.2f s, Deadband %.2f °C, ' ...
+                            'Stopp-Temp. %.1f °C, Kameras: %s).'], ...
+                           intervall, dbRun, stopTrun, camLabel()));
         catch ME
             logMsg("Start fehlgeschlagen: " + string(ME.message));
             cleanupResources();
@@ -344,6 +352,16 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             tsec = seconds(datetime('now') - t0);
             if ~isnan(vals(1)), addpoints(lineL, tsec, vals(1)); end
             if ~isnan(vals(2)), addpoints(lineR, tsec, vals(2)); end
+
+            % --- Automatischer Stopp: BEIDE Kanaele >= Stopp-Temperatur ---
+            if vals(1) >= stopTrun && vals(2) >= stopTrun
+                drawnow limitrate;
+                logMsg(sprintf(['Stopp-Temperatur erreicht (L: %.1f %s, ' ...
+                    'R: %.1f %s >= %.1f °C) — Lauf wird automatisch gestoppt.'], ...
+                    vals(1), uL, vals(2), uR, stopTrun));
+                onStop();
+                return;
+            end
 
             % --- Ausloeselogik links: nur wenn aktiv und Anstieg > Deadband ---
             if useL && vals(1) > prevL + dbRun
