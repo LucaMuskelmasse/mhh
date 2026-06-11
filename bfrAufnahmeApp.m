@@ -587,7 +587,7 @@ function cams = openDinoLiteCameras(dllPath, sides)
 %
 % ============================ KONFIGURATION ============================
     CONFIG(1).side = "LINKS";   CONFIG(1).winvideo = 1;  CONFIG(1).idaKey = "6&d82dd4a&0&0000";
-    CONFIG(2).side = "RECHTS";  CONFIG(2).winvideo = 3;  CONFIG(2).idaKey = "6&189ed0a2&8&0000";
+    CONFIG(2).side = "RECHTS";  CONFIG(2).winvideo = 3;  CONFIG(2).idaKey = "6&2b588147&5&0000";
 % =======================================================================
 
     if nargin < 1 || strlength(string(dllPath)) == 0, dllPath = "DNX64.dll"; end
