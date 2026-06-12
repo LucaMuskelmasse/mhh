@@ -45,6 +45,8 @@ cooling  = false;       % false = Aufwaermen (Ausloesung bei Anstieg),
 % Zur Laufzeit eingefrorene Parameter (beim Start aus den Feldern gelesen)
 dirLrun   = "";
 dirRrun   = "";
+csvLrun   = "";         % CSV-Tabelle links  (eine Zeile je gespeichertem Bild)
+csvRrun   = "";         % CSV-Tabelle rechts (eine Zeile je gespeichertem Bild)
 prefixRun = "";
 inlay1Run = "";         % Inlay-Kennnummer links  (fuer den Bildstempel)
 inlay2Run = "";         % Inlay-Kennnummer rechts (fuer den Bildstempel)
@@ -393,6 +395,11 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             % --- Versuchsordner + Unterordner nur fuer aktive Seiten anlegen ---
+            % Unterordner tragen die Inlay-Kennnummer der jeweiligen Seite
+            % (links -> MV<Inlay1>, rechts -> MV<Inlay2>). Pro Unterordner
+            % wird eine CSV-Tabelle <Praefix>-MV<Inlay>.csv angelegt, in die
+            % je gespeichertem Bild eine Zeile (Uhrzeit;Sekunden;Temperatur)
+            % geschrieben wird.
             if exist(ordner, 'dir')
                 logMsg("Ordner existiert bereits — wird weiterverwendet: " + ordner);
             else
@@ -400,10 +407,19 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 assert(okMk, "Versuchsordner konnte nicht erstellt werden: " + string(msgMk));
                 logMsg("Versuchsordner erstellt: " + ordner);
             end
-            dirLrun = string(fullfile(ordner, "links"));
-            dirRrun = string(fullfile(ordner, "rechts"));
-            if useL && ~exist(dirLrun, 'dir'), mkdir(dirLrun); end
-            if useR && ~exist(dirRrun, 'dir'), mkdir(dirRrun); end
+            dirLrun = string(fullfile(ordner, "MV" + inlay1));
+            dirRrun = string(fullfile(ordner, "MV" + inlay2));
+            csvLrun = "";  csvRrun = "";
+            if useL
+                if ~exist(dirLrun, 'dir'), mkdir(dirLrun); end
+                csvLrun = string(fullfile(dirLrun, prefixRun + "-MV" + inlay1 + ".csv"));
+                initCsv(csvLrun);
+            end
+            if useR
+                if ~exist(dirRrun, 'dir'), mkdir(dirRrun); end
+                csvRrun = string(fullfile(dirRrun, prefixRun + "-MV" + inlay2 + ".csv"));
+                initCsv(csvRrun);
+            end
 
             % UI sperren
             set(lockables, 'Enable', 'off');
@@ -564,7 +580,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 
             if useL && trigL
                 captureSingleFrameSide(cams.left, dirLrun, t0, prefixRun, vals(1), "L", ...
-                                       "MV" + inlay1Run);
+                                       "MV" + inlay1Run, csvLrun);
                 cntL = cntL + 1;
                 lblCntL.Text = num2str(cntL);
                 logMsg(sprintf("Aufnahme LINKS  bei %.1f %s (Bild %d).", vals(1), uL, cntL));
@@ -573,7 +589,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 
             if useR && trigR
                 captureSingleFrameSide(cams.right, dirRrun, t0, prefixRun, vals(2), "R", ...
-                                       "MV" + inlay2Run);
+                                       "MV" + inlay2Run, csvRrun);
                 cntR = cntR + 1;
                 lblCntR.Text = num2str(cntR);
                 logMsg(sprintf("Aufnahme RECHTS bei %.1f %s (Bild %d).", vals(2), uR, cntR));
@@ -625,6 +641,20 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         wantR  = camSel ~= "links";
         setInlay(lblInlay1, edtInlay1, wantL);
         setInlay(lblInlay2, edtInlay2, wantR);
+    end
+
+    function initCsv(p)
+        % Legt die Bild-Tabelle an (Spaltenkopf), falls sie noch nicht existiert.
+        % Semikolon-getrennt, damit sie sich direkt in (deutschem) Excel oeffnet.
+        if ~exist(p, 'file')
+            fid = fopen(p, 'w');
+            assert(fid > 0, "CSV-Datei konnte nicht erstellt werden: " + p);
+            fprintf(fid, 'Uhrzeit;Sekunden;Temperatur\n');
+            fclose(fid);
+            logMsg("Bild-Tabelle angelegt: " + p);
+        else
+            logMsg("Bild-Tabelle existiert bereits — wird fortgefuehrt: " + p);
+        end
     end
 
     function syncDbFields()
@@ -1068,7 +1098,7 @@ function u = unitName(c)
     end
 end
 
-function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, inlayLabel)
+function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, inlayLabel, csvPath)
 % CAPTURESINGLEFRAMESIDE  Speichert genau EIN Bild EINER Kamera (links ODER rechts).
 %
 % Dateiname:  <datePrefix>_<elapsed>_<temp>.jpg
@@ -1078,8 +1108,12 @@ function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, in
 %   unten links:  <yyyy/MM/dd> @ <HH:mm:ss> <inlayLabel>
 %   unten rechts: Temperature: <x,x> Deg-C
 %
-%   captureSingleFrameSide(cams.left,  dirL, t0, datePrefix, vals(1), "L", "MV71-07")
-%   captureSingleFrameSide(cams.right, dirR, t0, datePrefix, vals(2), "R", "MV71-08")
+% Ist csvPath angegeben, wird zusaetzlich eine Zeile
+%   Uhrzeit;Sekunden;Temperatur
+% an die Bild-Tabelle der Seite angehaengt (eine Zeile je Bild).
+%
+%   captureSingleFrameSide(cams.left,  dirL, t0, datePrefix, vals(1), "L", "MV71-07", csvL)
+%   captureSingleFrameSide(cams.right, dirR, t0, datePrefix, vals(2), "R", "MV71-08", csvR)
 %
 % Eingaben:
 %   cam        - Kamera-Objekt der gewuenschten Seite (z.B. cams.left)
@@ -1089,9 +1123,11 @@ function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, in
 %   temp       - aktuelle Temperatur dieser Seite (double, z.B. 3.5)
 %   sideLabel  - optionales Label nur fuer die Konsolenausgabe ("L"/"R")
 %   inlayLabel - optionale Inlay-Kennung fuer den Stempel (z.B. "MV71-07")
+%   csvPath    - optionaler Pfad der CSV-Tabelle dieser Seite
 
     if nargin < 6, sideLabel  = ""; end
     if nargin < 7, inlayLabel = ""; end
+    if nargin < 8, csvPath    = ""; end
 
     % Vergangene Sekunden seit Start -> identisches Namensschema wie zuvor
     elapsed = round(seconds(datetime('now') - t0));
@@ -1115,6 +1151,22 @@ function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, in
         imwrite(img, fullfile(outDir, fname));
         fprintf("[%s] %s gespeichert: %s\n", ...
                 datestr(now,'HH:MM:SS'), sideLabel, fname);
+
+        % --- Zeile an die Bild-Tabelle anhaengen (Fehler hier duerfen das
+        %     gespeicherte Bild nicht betreffen -> eigenes try/catch) ---
+        if strlength(string(csvPath)) > 0
+            try
+                fid = fopen(csvPath, 'a');
+                assert(fid > 0);
+                fprintf(fid, '%s;%d;%s\n', ...
+                    char(datetime(nowDt,'Format','HH:mm:ss')), elapsed, ...
+                    strrep(sprintf('%.1f', temp), '.', ','));
+                fclose(fid);
+            catch
+                warning("CSV-Eintrag (%s) bei t=%ds fehlgeschlagen.", ...
+                        sideLabel, elapsed);
+            end
+        end
     catch ME
         warning("Aufnahme (%s) bei t=%ds fehlgeschlagen: %s", ...
                 sideLabel, elapsed, ME.message);
