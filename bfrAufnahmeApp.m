@@ -40,6 +40,8 @@ cooling  = false;       % false = Aufwaermen (Ausloesung bei Anstieg),
 dirLrun   = "";
 dirRrun   = "";
 prefixRun = "";
+inlay1Run = "";         % Inlay-Kennnummer links  (fuer den Bildstempel)
+inlay2Run = "";         % Inlay-Kennnummer rechts (fuer den Bildstempel)
 useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
 stopTrun  = 70;         % Stopp-Temperatur Aufwaermen: Ende, wenn BEIDE Kanaele >= Wert
@@ -301,6 +303,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             useL   = camSel ~= "rechts";
             useR   = camSel ~= "links";
 
+            % Inlay-Nummern fuer den Bildstempel einfrieren
+            inlay1Run = inlay1;
+            inlay2Run = inlay2;
+
             assert(strlength(port)    > 0, "COM-Port darf nicht leer sein.");
             assert(intervall          > 0, "Intervall muss > 0 sein.");
             assert(strlength(baseDir) > 0, "Basisordner darf nicht leer sein.");
@@ -494,7 +500,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             if useL && trigL
-                captureSingleFrameSide(cams.left, dirLrun, t0, prefixRun, vals(1), "L");
+                captureSingleFrameSide(cams.left, dirLrun, t0, prefixRun, vals(1), "L", ...
+                                       "MV" + inlay1Run);
                 cntL = cntL + 1;
                 lblCntL.Text = num2str(cntL);
                 logMsg(sprintf("Aufnahme LINKS  bei %.1f %s (Bild %d).", vals(1), uL, cntL));
@@ -502,7 +509,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             if useR && trigR
-                captureSingleFrameSide(cams.right, dirRrun, t0, prefixRun, vals(2), "R");
+                captureSingleFrameSide(cams.right, dirRrun, t0, prefixRun, vals(2), "R", ...
+                                       "MV" + inlay2Run);
                 cntR = cntR + 1;
                 lblCntR.Text = num2str(cntR);
                 logMsg(sprintf("Aufnahme RECHTS bei %.1f %s (Bild %d).", vals(2), uR, cntR));
@@ -988,14 +996,18 @@ function u = unitName(c)
     end
 end
 
-function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel)
+function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, inlayLabel)
 % CAPTURESINGLEFRAMESIDE  Speichert genau EIN Bild EINER Kamera (links ODER rechts).
 %
 % Dateiname:  <datePrefix>_<elapsed>_<temp>.jpg
 % Beispiel:   20250924_123621_03-5.jpg   (Temperatur 3.5, '.' ersetzt durch '-')
 %
-%   captureSingleFrameSide(cams.left,  dirL, t0, datePrefix, vals(1), "L")
-%   captureSingleFrameSide(cams.right, dirR, t0, datePrefix, vals(2), "R")
+% Vor dem Speichern werden Stempel ins Bild gebrannt:
+%   unten links:  <yyyy/MM/dd> @ <HH:mm:ss> <inlayLabel>
+%   unten rechts: Temperature: <x,x> Deg-C
+%
+%   captureSingleFrameSide(cams.left,  dirL, t0, datePrefix, vals(1), "L", "MV71-07")
+%   captureSingleFrameSide(cams.right, dirR, t0, datePrefix, vals(2), "R", "MV71-08")
 %
 % Eingaben:
 %   cam        - Kamera-Objekt der gewuenschten Seite (z.B. cams.left)
@@ -1004,8 +1016,10 @@ function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel)
 %   datePrefix - Dateinamen-Praefix (Datum zuerst)
 %   temp       - aktuelle Temperatur dieser Seite (double, z.B. 3.5)
 %   sideLabel  - optionales Label nur fuer die Konsolenausgabe ("L"/"R")
+%   inlayLabel - optionale Inlay-Kennung fuer den Stempel (z.B. "MV71-07")
 
-    if nargin < 6, sideLabel = ""; end
+    if nargin < 6, sideLabel  = ""; end
+    if nargin < 7, inlayLabel = ""; end
 
     % Vergangene Sekunden seit Start -> identisches Namensschema wie zuvor
     elapsed = round(seconds(datetime('now') - t0));
@@ -1016,12 +1030,109 @@ function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel)
     fname = sprintf('%s_%06d_%s.jpg', datePrefix, elapsed, tempStr);
 
     try
-        % Bild aus dem Videostream holen und speichern
-        imwrite(getsnapshot(cam), fullfile(outDir, fname));
+        % Bild aus dem Videostream holen, stempeln und speichern
+        img = getsnapshot(cam);
+
+        nowDt   = datetime('now');
+        stampBL = strtrim(sprintf('%s @ %s %s', ...
+            char(datetime(nowDt,'Format','yyyy/MM/dd')), ...
+            char(datetime(nowDt,'Format','HH:mm:ss')), char(inlayLabel)));
+        stampBR = ['Temperature: ' strrep(sprintf('%.1f', temp), '.', ',') ' Deg-C'];
+        img = stampImage(img, stampBL, stampBR);
+
+        imwrite(img, fullfile(outDir, fname));
         fprintf("[%s] %s gespeichert: %s\n", ...
                 datestr(now,'HH:MM:SS'), sideLabel, fname);
     catch ME
         warning("Aufnahme (%s) bei t=%ds fehlgeschlagen: %s", ...
                 sideLabel, elapsed, ME.message);
     end
+end
+
+function img = stampImage(img, txtBL, txtBR)
+% STAMPIMAGE  Brennt die Stempeltexte unten links/rechts ins Bild ein
+% (weisse Schrift auf schwarzem Kasten).
+%
+% Bevorzugt insertText (Computer Vision Toolbox); ist die Toolbox nicht
+% installiert, rendert ein Fallback den Text ueber eine unsichtbare Figure.
+% Schlaegt auch das fehl, wird das Bild UNGESTEMPELT zurueckgegeben — der
+% Stempel darf das Speichern der Aufnahme nie verhindern.
+    try
+        H    = size(img,1);  W = size(img,2);
+        fs   = max(14, round(H/42));        % Schriftgroesse an Bildhoehe koppeln
+        marg = max(8,  round(H/60));        % Randabstand
+
+        if exist('insertText','file')
+            img = insertText(img, [marg,   H-marg], txtBL, 'FontSize',fs, ...
+                'TextColor','white', 'BoxColor','black', 'BoxOpacity',1, ...
+                'AnchorPoint','LeftBottom');
+            img = insertText(img, [W-marg, H-marg], txtBR, 'FontSize',fs, ...
+                'TextColor','white', 'BoxColor','black', 'BoxOpacity',1, ...
+                'AnchorPoint','RightBottom');
+        else
+            img = blitLabel(img, renderTextStrip(txtBL, fs), 'sw', marg);
+            img = blitLabel(img, renderTextStrip(txtBR, fs), 'se', marg);
+        end
+    catch ME
+        warning('Bildstempel fehlgeschlagen (%s) — Bild wird ungestempelt gespeichert.', ...
+                ME.message);
+    end
+end
+
+function strip = renderTextStrip(txt, fontPx)
+% Rendert weissen Text auf schwarzem Grund als RGB-Streifen (uint8).
+% Nutzt eine persistente unsichtbare Figure, damit pro Bild nur der Text
+% aktualisiert und gerendert werden muss.
+    persistent hFig hTxt
+    if isempty(hFig) || ~ishghandle(hFig)
+        hFig = figure('Visible','off', 'Units','pixels', ...
+                      'Position',[50 50 1200 120], 'Color','k', ...
+                      'MenuBar','none', 'ToolBar','none', ...
+                      'IntegerHandle','off', 'HandleVisibility','off');
+        hAx  = axes('Parent',hFig, 'Units','normalized', 'Position',[0 0 1 1], ...
+                    'Visible','off', 'XLim',[0 1200], 'YLim',[0 120]);
+        hTxt = text(hAx, 10, 60, '', 'Color','w', 'FontUnits','pixels', ...
+                    'FontName','Consolas', 'Interpreter','none', ...
+                    'VerticalAlignment','middle');
+    end
+    hTxt.FontSize = fontPx;
+    hTxt.String   = txt;
+
+    fr   = getframe(hFig);
+    A    = fr.cdata;
+    mask = any(A > 40, 3);                  % Pixel mit Textanteil
+    rows = find(any(mask,2));  cols = find(any(mask,1));
+    if isempty(rows)                        % nichts gerendert -> leerer Kasten
+        strip = zeros(2*fontPx, 4*fontPx, 3, 'uint8');
+        return;
+    end
+    pad = round(0.4*fontPx);                % schwarzer Rand um den Text
+    r1 = max(1, rows(1)-pad);  r2 = min(size(A,1), rows(end)+pad);
+    c1 = max(1, cols(1)-pad);  c2 = min(size(A,2), cols(end)+pad);
+    strip = A(r1:r2, c1:c2, :);
+end
+
+function img = blitLabel(img, strip, corner, marg)
+% Kopiert einen Textstreifen deckend in die linke ('sw') oder rechte ('se')
+% untere Bildecke. Klassen-/Graustufen-sicher.
+    if ndims(img) == 2                              % Graustufenbild
+        strip = uint8(mean(double(strip), 3));
+    end
+    if isfloat(img)
+        strip = cast(strip, 'like', img) / 255;     % double/single: 0..1
+    elseif ~isa(img, 'uint8')
+        strip = cast(double(strip) / 255 * double(intmax(class(img))), class(img));
+    end
+
+    [sh, sw, ~] = size(strip);
+    [H,  W,  ~] = size(img);
+    sh = min(sh, H);  sw = min(sw, W);
+    strip = strip(1:sh, 1:sw, :);
+
+    r2 = min(H, H - marg);  r1 = max(1, r2 - sh + 1);
+    switch corner
+        case 'sw',  c1 = min(W, 1 + marg);  c2 = min(W, c1 + sw - 1);
+        otherwise,  c2 = max(1, W - marg);  c1 = max(1, c2 - sw + 1);
+    end
+    img(r1:r2, c1:c2, :) = strip(1:(r2-r1+1), 1:(c2-c1+1), :);
 end
