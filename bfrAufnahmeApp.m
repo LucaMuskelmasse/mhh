@@ -7,6 +7,12 @@ function bfrAufnahmeApp
 %   letzten Ausloesewert steigt (Geraeteaufloesung 0.1 °C -> ein Bild je
 %   0.1-Grad-Schritt).
 %
+%   Optionales Deadband ("Deadband aktiv"): Ausserhalb des Feinbereichs
+%   (T <= DB-Ende oder T >= DB-Start) loest erst eine Temperaturaenderung
+%   um den DB-Schritt ein Bild aus — im Feinbereich dazwischen, in dem
+%   sich der Formgedaechtniseffekt abspielt, gilt weiterhin jeder
+%   0.1-Grad-Schritt.
+%
 %   Mit dem Umschaltknopf "Abkühlvorgang" (waehrend des Laufs) wird die
 %   Ausloesung umgedreht: Es wird ein Foto gemacht, sobald die Temperatur
 %   unter den letzten Ausloesewert FAELLT.
@@ -46,6 +52,10 @@ useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
 stopTrun  = 70;         % Stopp-Temperatur Aufwaermen: Ende, wenn BEIDE Kanaele >= Wert
 stopCrun  = 37;         % Stopp-Temperatur Abkuehlen:  Ende, wenn BEIDE Kanaele <= Wert
+dbOnRun   = false;      % Deadband in diesem Lauf aktiv?
+dbLowRun  = 25;         % Ende des ersten Deadband-Bereichs  (T <= Wert -> grob)
+dbHighRun = 60;         % Start des zweiten Deadband-Bereichs (T >= Wert -> grob)
+dbStepRun = 1.0;        % Schrittweite im Deadband-Bereich [°C]
 
 %% ================================ UI-Aufbau =====================================
 fig = uifigure('Name','BFR-Versuch — Aufnahmesteuerung', ...
@@ -65,9 +75,9 @@ gLeft.Padding       = [0 0 0 0];
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [12 3]);
+gP = uigridlayout(pnlParam, [16 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 12);
+gP.RowHeight   = repmat({'fit'}, 1, 16);
 
 uilabel(gP, 'Text','COM-Port:');
 edtCom = uieditfield(gP, 'text', 'Value','COM4');
@@ -89,6 +99,35 @@ edtStopC = uieditfield(gP, 'numeric', 'Value',37, ...
     'Tooltip',['Abkuehlvorgang: Lauf stoppt automatisch, wenn BEIDE ' ...
                'Kanaele <= diesem Wert sind.']);
 edtStopC.Layout.Column = [2 3];
+
+chkDb = uicheckbox(gP, 'Text','Deadband aktiv', 'Value',false, ...
+    'Tooltip',['Aktiv: ausserhalb des Feinbereichs (zwischen DB-Ende und ' ...
+               'DB-Start) loest erst eine Temperaturaenderung um den ' ...
+               'DB-Schritt ein Bild aus. Inaktiv: ueberall 0.1-Grad-Schritte.'], ...
+    'ValueChangedFcn', @(~,~) syncDbFields());
+chkDb.Layout.Column = [1 3];
+
+lblDbLow = uilabel(gP, 'Text','DB-Ende [°C]:');
+edtDbLow = uieditfield(gP, 'numeric', 'Value',25, ...
+    'Tooltip',['Bis zu dieser Temperatur gilt das erste Deadband ' ...
+               '(grobe Schritte); darueber beginnt der Feinbereich.']);
+edtDbLow.Layout.Column = [2 3];
+
+lblDbHigh = uilabel(gP, 'Text','DB-Start [°C]:');
+edtDbHigh = uieditfield(gP, 'numeric', 'Value',60, ...
+    'Tooltip',['Ab dieser Temperatur gilt das zweite Deadband ' ...
+               '(grobe Schritte); darunter endet der Feinbereich.']);
+edtDbHigh.Layout.Column = [2 3];
+
+lblDbStep = uilabel(gP, 'Text','DB-Schritt [°C]:');
+edtDbStep = uieditfield(gP, 'numeric', 'Value',1.0, 'Limits',[0 Inf], ...
+    'LowerLimitInclusive','off', ...
+    'Tooltip',['Schrittweite im Deadband-Bereich: Bild erst, wenn sich die ' ...
+               'Temperatur seit dem letzten Bild um diesen Wert geaendert hat.']);
+edtDbStep.Layout.Column = [2 3];
+
+% Deadband-Felder passend zum Haekchen ein-/ausblenden (Initialzustand)
+syncDbFields();
 
 uilabel(gP, 'Text','Kameras:');
 ddCams = uidropdown(gP, ...
@@ -132,9 +171,9 @@ edtPrefix = uieditfield(gP, 'text', ...
 edtPrefix.Layout.Column = [2 3];
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
-lockables = [edtCom, edtInt, edtStopT, edtStopC, ddCams, edtBase, ...
-             edtDatum, edtInlay1, edtInlay2, chkFM, chkSpiral, edtPrefix, ...
-             btnBrowseBase];
+lockables = [edtCom, edtInt, edtStopT, edtStopC, chkDb, edtDbLow, ...
+             edtDbHigh, edtDbStep, ddCams, edtBase, edtDatum, edtInlay1, ...
+             edtInlay2, chkFM, chkSpiral, edtPrefix, btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -292,6 +331,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             intervall = edtInt.Value;
             stopTrun  = edtStopT.Value;
             stopCrun  = edtStopC.Value;
+            dbOnRun   = logical(chkDb.Value);
+            dbLowRun  = edtDbLow.Value;
+            dbHighRun = edtDbHigh.Value;
+            dbStepRun = edtDbStep.Value;
             baseDir   = strtrim(string(edtBase.Value));
             datum     = strtrim(string(edtDatum.Value));
             inlay1    = regexprep(strtrim(string(edtInlay1.Value)), '^(MV|mv)', '');
@@ -312,6 +355,11 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             assert(strlength(baseDir) > 0, "Basisordner darf nicht leer sein.");
             assert(~isempty(regexp(datum, '^\d{4}-\d{2}-\d{2}$', 'once')), ...
                    "Datum bitte im Format YYYY-MM-DD angeben.");
+            if dbOnRun
+                assert(dbLowRun < dbHighRun, ...
+                       "DB-Ende muss unterhalb von DB-Start liegen.");
+                assert(dbStepRun > 0, "DB-Schritt muss > 0 sein.");
+            end
             % Nur die Inlays der aktiven Seite(n) sind Pflicht
             if useL
                 assert(strlength(inlay1) > 0, "Kennnummer Inlay 1 (links) darf nicht leer sein.");
@@ -407,14 +455,21 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             btnStop.Enable = 'on';
             lamp.Color     = [0 0.8 0];
             lblState.Text  = 'läuft (Aufwärmen)';
+            if dbOnRun
+                dbInfo = sprintf('Deadband %.1f °C (grob bei T <= %.1f und T >= %.1f °C)', ...
+                                 dbStepRun, dbLowRun, dbHighRun);
+            else
+                dbInfo = 'Deadband inaktiv (ueberall 0.1-Grad-Schritte)';
+            end
             logMsg(sprintf(['Lauf gestartet (Intervall %.2f s, ' ...
-                            'Stopp Aufw. %.1f °C, Stopp Abk. %.1f °C, Kameras: %s).'], ...
-                           intervall, stopTrun, stopCrun, camLabel()));
+                            'Stopp Aufw. %.1f °C, Stopp Abk. %.1f °C, %s, Kameras: %s).'], ...
+                           intervall, stopTrun, stopCrun, dbInfo, camLabel()));
         catch ME
             logMsg("Start fehlgeschlagen: " + string(ME.message));
             cleanupResources();
             set(lockables, 'Enable', 'on');
             syncInlayFields();          % Inlay-Sichtbarkeit wiederherstellen
+            syncDbFields();             % Deadband-Felder-Zustand wiederherstellen
             btnStart.Enable = 'on';
             btnStop.Enable  = 'off';
             btnCool.Enable  = 'off';
@@ -487,16 +542,24 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 return;
             end
 
-            % --- Ausloeselogik: Aufwaermen -> jeder Anstieg ueber den letzten
-            %     Ausloesewert, Abkuehlen -> jeder Abfall darunter. Bei der
-            %     Geraeteaufloesung von 0.1 °C ergibt das ein Bild je
-            %     0.1-Grad-Schritt (jeweils nur aktive Seiten). ---
+            % --- Ausloeselogik ---
+            % Feinbereich (DB-Ende < T < DB-Start bzw. Deadband inaktiv):
+            %   jeder 0.1-Grad-Schritt loest aus.
+            % Deadband-Bereich (T <= DB-Ende oder T >= DB-Start, nur wenn
+            %   Deadband aktiv): erst eine Aenderung um DB-Schritt loest aus.
+            % Richtung je Modus: Aufwaermen -> Anstieg, Abkuehlen -> Abfall.
+            stepL = 0;  stepR = 0;            % 0 -> jeder Schritt loest aus
+            if dbOnRun
+                if vals(1) <= dbLowRun || vals(1) >= dbHighRun, stepL = dbStepRun; end
+                if vals(2) <= dbLowRun || vals(2) >= dbHighRun, stepR = dbStepRun; end
+            end
+            eps0 = 1e-9;                      % Toleranz gegen Rundungsfehler
             if cooling
-                trigL = vals(1) < prevL;
-                trigR = vals(2) < prevR;
+                trigL = vals(1) < prevL && (prevL - vals(1) >= stepL - eps0);
+                trigR = vals(2) < prevR && (prevR - vals(2) >= stepR - eps0);
             else
-                trigL = vals(1) > prevL;
-                trigR = vals(2) > prevR;
+                trigL = vals(1) > prevL && (vals(1) - prevL >= stepL - eps0);
+                trigR = vals(2) > prevR && (vals(2) - prevR >= stepR - eps0);
             end
 
             if useL && trigL
@@ -532,6 +595,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         cooling         = false;
         set(lockables, 'Enable', 'on');
         syncInlayFields();          % Inlay-Sichtbarkeit wiederherstellen
+        syncDbFields();             % Deadband-Felder-Zustand wiederherstellen
         btnStart.Enable = 'on';
         btnStop.Enable  = 'off';
         btnCool.Enable  = 'off';
@@ -561,6 +625,14 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         wantR  = camSel ~= "links";
         setInlay(lblInlay1, edtInlay1, wantL);
         setInlay(lblInlay2, edtInlay2, wantR);
+    end
+
+    function syncDbFields()
+        % Graut die Deadband-Felder passend zum Haekchen ein/aus.
+        % Werte bleiben dabei erhalten (nur Enable wird umgeschaltet).
+        if chkDb.Value, st = 'on'; else, st = 'off'; end
+        set([lblDbLow edtDbLow lblDbHigh edtDbHigh lblDbStep edtDbStep], ...
+            'Enable', st);
     end
 
     function setInlay(lbl, edt, on)
