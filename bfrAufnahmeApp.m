@@ -133,7 +133,7 @@ syncDbFields();
 
 uilabel(gP, 'Text','Kameras:');
 ddCams = uidropdown(gP, ...
-    'Items',         {'Beide','Nur links','Nur rechts'}, ...
+    'Items',         {'Beide','Nur Kamera 1 (links)','Nur Kamera 2 (rechts)'}, ...
     'ItemsData',     {'beide','links','rechts'}, ...
     'Value',         'beide', ...
     'Tooltip',       'Welche Kamera(s) sollen in diesem Lauf aufnehmen?', ...
@@ -151,11 +151,11 @@ edtDatum = uieditfield(gP, 'text', ...
     'Tooltip','Format YYYY-MM-DD');
 edtDatum.Layout.Column = [2 3];
 
-lblInlay1 = uilabel(gP, 'Text','Inlay 1 (links):');
+lblInlay1 = uilabel(gP, 'Text','Inlay 1 (Kamera 1):');
 edtInlay1 = uieditfield(gP, 'text', 'Placeholder','xx-xx');
 edtInlay1.Layout.Column = [2 3];
 
-lblInlay2 = uilabel(gP, 'Text','Inlay 2 (rechts):');
+lblInlay2 = uilabel(gP, 'Text','Inlay 2 (Kamera 2):');
 edtInlay2 = uieditfield(gP, 'text', 'Placeholder','xx-xx');
 edtInlay2.Layout.Column = [2 3];
 
@@ -200,11 +200,11 @@ lblState = uilabel(gC, 'Text','gestoppt');
 % --- Zaehler-Panel ---
 pnlCnt = uipanel(gLeft, 'Title','Bildzaehler');
 gZ = uigridlayout(pnlCnt, [2 2]);
-gZ.ColumnWidth = {'1x','1x'};
+gZ.ColumnWidth = {200, '1x'};
 
-uilabel(gZ, 'Text','Bilder links:');
+uilabel(gZ, 'Text','Bilder Kamera 1 (links):');
 lblCntL = uilabel(gZ, 'Text','0', 'FontWeight','bold');
-uilabel(gZ, 'Text','Bilder rechts:');
+uilabel(gZ, 'Text','Bilder Kamera 2 (rechts):');
 lblCntR = uilabel(gZ, 'Text','0', 'FontWeight','bold');
 
 % ------------------------------ rechte Spalte -----------------------------------
@@ -221,8 +221,8 @@ lblTR = uilabel(gRight, 'Text','— °C', 'FontSize',38, 'FontWeight','bold', ..
                 'HorizontalAlignment','center');
 
 % --- Live-Kameravorschau links/rechts ---
-axCamL = uiaxes(gRight); title(axCamL, 'Kamera LINKS');
-axCamR = uiaxes(gRight); title(axCamR, 'Kamera RECHTS');
+axCamL = uiaxes(gRight); title(axCamL, 'Kamera 1 (links)');
+axCamR = uiaxes(gRight); title(axCamR, 'Kamera 2 (rechts)');
 for ax = [axCamL axCamR]
     ax.XTick = []; ax.YTick = [];
 end
@@ -234,9 +234,9 @@ axPlot.Layout.Column = [1 2];
 hold(axPlot, 'on'); grid(axPlot, 'on');
 xlabel(axPlot, 't seit Start [s]'); ylabel(axPlot, 'Temperatur');
 lineL = animatedline(axPlot, 'Color',[0.00 0.45 0.74], 'LineWidth',1.5, ...
-                     'MaximumNumPoints',7200, 'DisplayName','links');
+                     'MaximumNumPoints',7200, 'DisplayName','Kamera 1 (links)');
 lineR = animatedline(axPlot, 'Color',[0.85 0.33 0.10], 'LineWidth',1.5, ...
-                     'MaximumNumPoints',7200, 'DisplayName','rechts');
+                     'MaximumNumPoints',7200, 'DisplayName','Kamera 2 (rechts)');
 legend(axPlot, 'Location','northwest');
 
 % ------------------------------ Status-Log --------------------------------------
@@ -364,10 +364,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
             % Nur die Inlays der aktiven Seite(n) sind Pflicht
             if useL
-                assert(strlength(inlay1) > 0, "Kennnummer Inlay 1 (links) darf nicht leer sein.");
+                assert(strlength(inlay1) > 0, "Kennnummer Inlay 1 (Kamera 1) darf nicht leer sein.");
             end
             if useR
-                assert(strlength(inlay2) > 0, "Kennnummer Inlay 2 (rechts) darf nicht leer sein.");
+                assert(strlength(inlay2) > 0, "Kennnummer Inlay 2 (Kamera 2) darf nicht leer sein.");
             end
             assert(strlength(prefixRun) > 0, "Datums-Praefix darf nicht leer sein.");
 
@@ -532,8 +532,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 
             % --- Live-Anzeige + Plot aktualisieren (beide Kanaele, unabhaengig
             %     von der Kameraauswahl) ---
-            lblTL.Text = sprintf('L: %.1f %s', vals(1), uL);
-            lblTR.Text = sprintf('R: %.1f %s', vals(2), uR);
+            lblTL.Text = sprintf('1: %.1f %s', vals(1), uL);
+            lblTR.Text = sprintf('2: %.1f %s', vals(2), uR);
 
             tsec = seconds(datetime('now') - t0);
             if ~isnan(vals(1)), addpoints(lineL, tsec, vals(1)); end
@@ -543,16 +543,16 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             % Aufwaermen: BEIDE Kanaele >= Stopp Aufw.  |  Abkuehlen: BEIDE <= Stopp Abk.
             if ~cooling && vals(1) >= stopTrun && vals(2) >= stopTrun
                 drawnow limitrate;
-                logMsg(sprintf(['Stopp-Temperatur Aufwaermen erreicht (L: %.1f %s, ' ...
-                    'R: %.1f %s >= %.1f °C) — Lauf wird automatisch gestoppt.'], ...
+                logMsg(sprintf(['Stopp-Temperatur Aufwaermen erreicht (Kamera 1: %.1f %s, ' ...
+                    'Kamera 2: %.1f %s >= %.1f °C) — Lauf wird automatisch gestoppt.'], ...
                     vals(1), uL, vals(2), uR, stopTrun));
                 onStop();
                 return;
             end
             if cooling && vals(1) <= stopCrun && vals(2) <= stopCrun
                 drawnow limitrate;
-                logMsg(sprintf(['Stopp-Temperatur Abkuehlen erreicht (L: %.1f %s, ' ...
-                    'R: %.1f %s <= %.1f °C) — Lauf wird automatisch gestoppt.'], ...
+                logMsg(sprintf(['Stopp-Temperatur Abkuehlen erreicht (Kamera 1: %.1f %s, ' ...
+                    'Kamera 2: %.1f %s <= %.1f °C) — Lauf wird automatisch gestoppt.'], ...
                     vals(1), uL, vals(2), uR, stopCrun));
                 onStop();
                 return;
@@ -579,20 +579,20 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             if useL && trigL
-                captureSingleFrameSide(cams.left, dirLrun, t0, prefixRun, vals(1), "L", ...
+                captureSingleFrameSide(cams.left, dirLrun, t0, prefixRun, vals(1), "1", ...
                                        "MV" + inlay1Run, csvLrun);
                 cntL = cntL + 1;
                 lblCntL.Text = num2str(cntL);
-                logMsg(sprintf("Aufnahme LINKS  bei %.1f %s (Bild %d).", vals(1), uL, cntL));
+                logMsg(sprintf("Aufnahme Kamera 1 (links)  bei %.1f %s (Bild %d).", vals(1), uL, cntL));
                 prevL = vals(1);            % nur bei Ausloesung aktualisieren
             end
 
             if useR && trigR
-                captureSingleFrameSide(cams.right, dirRrun, t0, prefixRun, vals(2), "R", ...
+                captureSingleFrameSide(cams.right, dirRrun, t0, prefixRun, vals(2), "2", ...
                                        "MV" + inlay2Run, csvRrun);
                 cntR = cntR + 1;
                 lblCntR.Text = num2str(cntR);
-                logMsg(sprintf("Aufnahme RECHTS bei %.1f %s (Bild %d).", vals(2), uR, cntR));
+                logMsg(sprintf("Aufnahme Kamera 2 (rechts) bei %.1f %s (Bild %d).", vals(2), uR, cntR));
                 prevR = vals(2);            % nur bei Ausloesung aktualisieren
             end
 
@@ -618,7 +618,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         btnCool.Value   = false;
         lamp.Color      = [0.6 0.6 0.6];
         lblState.Text   = 'gestoppt';
-        logMsg(sprintf("Lauf beendet. Bilder links: %d, rechts: %d.", cntL, cntR));
+        logMsg(sprintf("Lauf beendet. Bilder Kamera 1 (links): %d, Kamera 2 (rechts): %d.", cntL, cntR));
     end
 
     % ---------------------------------------------------------- Fenster zu -----
@@ -680,9 +680,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         if useL && useR
             lbl = "beide";
         elseif useL
-            lbl = "nur links";
+            lbl = "nur Kamera 1 (links)";
         else
-            lbl = "nur rechts";
+            lbl = "nur Kamera 2 (rechts)";
         end
     end
 
@@ -699,10 +699,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         % schliesst die von openDinoLiteCameras erzeugten externen Fenster und
         % markiert die Achsen inaktiver Seiten.
         stoppreview(activeCams());
-        for nm = ["LINKS","RECHTS"]
-            fOld = findall(0, 'Type','figure', 'Name',char(nm));
-            delete(fOld);
-        end
+        delete(findall(0, 'Type','figure', 'Tag','bfrPreview'));
         if useL
             hImL = makePreviewImage(axCamL, cams.left);
             preview(cams.left, hImL);      % fluessiger Stream, getrennt vom
@@ -911,7 +908,13 @@ function cams = openDinoLiteCameras(dllPath, sides)
             vid.FramesPerTrigger = 1;
             triggerconfig(vid, 'manual');
 
-            hFig = figure('Name', char(CONFIG(c).side), 'NumberTitle', 'off', ...
+            if CONFIG(c).side == "LINKS"
+                dispName = 'Kamera 1 (links)';
+            else
+                dispName = 'Kamera 2 (rechts)';
+            end
+            hFig = figure('Name', dispName, 'NumberTitle', 'off', ...
+                          'Tag', 'bfrPreview', ...
                           'MenuBar', 'none', 'Position', posBySide.(CONFIG(c).side), ...
                           'Color', [0.11 0.11 0.13]);
             figs = [figs hFig]; %#ok<AGROW>
@@ -919,7 +922,7 @@ function cams = openDinoLiteCameras(dllPath, sides)
             hAx = axes('Parent', hFig);
             hIm = image(zeros(res(2), res(1), nb), 'Parent', hAx);
             axis(hAx, 'image'); axis(hAx, 'off');
-            title(hAx, CONFIG(c).side, 'FontSize', 16, 'FontWeight', 'bold', ...
+            title(hAx, dispName, 'FontSize', 16, 'FontWeight', 'bold', ...
                   'Color', [0.91 0.91 0.93]);
             preview(vid, hIm);
 
@@ -946,7 +949,11 @@ function cams = openDinoLiteCameras(dllPath, sides)
     pause(0.5); drawnow;
     fprintf("\nWarte auf Bestaetigung der Scharfstellung...\n");
     if numel(CONFIG) == 1
-        frage = sprintf('Ist die Kamera %s scharf gestellt?', CONFIG(1).side);
+        if CONFIG(1).side == "LINKS"
+            frage = 'Ist Kamera 1 (links) scharf gestellt?';
+        else
+            frage = 'Ist Kamera 2 (rechts) scharf gestellt?';
+        end
     else
         frage = 'Sind beide Kameras scharf gestellt?';
     end
