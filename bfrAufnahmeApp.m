@@ -170,15 +170,26 @@ edtInlay2.Layout.Column = [2 3];
 % Inlay-Felder passend zur Kameraauswahl ein-/ausblenden (Initialzustand)
 syncInlayFields();
 
-chkFM = uicheckbox(gP, 'Text','Funktionsmuster (-FM)');
-chkFM.Layout.Column = [1 3];
-chkSpiral = uicheckbox(gP, 'Text','Spiralform (-s)');
-chkSpiral.Layout.Column = [1 3];
+uilabel(gP, 'Text','Muster:');
+ddMuster = uidropdown(gP, ...
+    'Items',     {'(keins)','Funktionsmuster (-FM)','Labormuster (-LM)'}, ...
+    'ItemsData', {'','-FM','-LM'}, ...
+    'Value',     '', ...
+    'Tooltip',   'Mustertyp -> Suffix im Versuchsordner-Namen.');
+ddMuster.Layout.Column = [2 3];
+
+uilabel(gP, 'Text','Form:');
+ddForm = uidropdown(gP, ...
+    'Items',     {'(keine)','Spiralform (-s)','Gerade Form (-g)'}, ...
+    'ItemsData', {'','-s','-g'}, ...
+    'Value',     '', ...
+    'Tooltip',   'Form -> Suffix im Versuchsordner-Namen.');
+ddForm.Layout.Column = [2 3];
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
 lockables = [edtCom, edtInt, edtStopT, edtStopC, chkDb, edtIbStart, ...
              edtIbEnd, edtIbStep, edtObStep, ddCams, edtBase, edtDatum, ...
-             edtInlay1, edtInlay2, chkFM, chkSpiral, btnBrowseBase];
+             edtInlay1, edtInlay2, ddMuster, ddForm, btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -378,15 +389,19 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 assert(strlength(inlay2) > 0, "Kennnummer Inlay 2 (Kamera 2) darf nicht leer sein.");
             end
 
+            % --- Muster-/Form-Suffix aus den Dropdowns ("" | "-FM"/"-LM" |
+            %     "" | "-s"/"-g") ---
+            muster = string(ddMuster.Value);
+            form   = string(ddForm.Value);
+
             % --- Versuchsordner nach festem Namensschema zusammensetzen ---
-            % beide : <Datum>-MV<Inlay1>-MV<Inlay2>[-FM][-s]
-            % links : <Datum>-MV<Inlay1>[-FM][-s]
-            % rechts: <Datum>-MV<Inlay2>[-FM][-s]
+            % beide : <Datum>-MV<Inlay1>-MV<Inlay2>[-FM|-LM][-s|-g]
+            % links : <Datum>-MV<Inlay1>[-FM|-LM][-s|-g]
+            % rechts: <Datum>-MV<Inlay2>[-FM|-LM][-s|-g]
             name = datum;
             if useL, name = name + "-MV" + inlay1; end
             if useR, name = name + "-MV" + inlay2; end
-            if chkFM.Value,     name = name + "-FM"; end
-            if chkSpiral.Value, name = name + "-s";  end
+            name = name + muster + form;
             ordner = string(fullfile(baseDir, name));
 
             % --- Bestaetigung wie im alten Skript ---
@@ -421,6 +436,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             n1 = @(x) strrep(sprintf('%.1f', x), '.', ',');
             inl1Str = "(nicht verwendet)";  if useL, inl1Str = "MV" + inlay1; end
             inl2Str = "(nicht verwendet)";  if useR, inl2Str = "MV" + inlay2; end
+            % Lesbaren Auswahltext der Dropdowns fuer den CSV-Kopf holen
+            musterText = string(ddMuster.Items{strcmp(string(ddMuster.ItemsData), muster)});
+            formText   = string(ddForm.Items{strcmp(string(ddForm.ItemsData), form)});
             paramLines = [ ...
                 "Parameter;Wert"; ...
                 "COM-Port;"            + port; ...
@@ -436,8 +454,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 "Datum;"               + datum; ...
                 "Inlay 1 (Kamera 1);" + inl1Str; ...
                 "Inlay 2 (Kamera 2);" + inl2Str; ...
-                "Funktionsmuster (-FM);" + jaNein(chkFM.Value); ...
-                "Spiralform (-s);"     + jaNein(chkSpiral.Value); ...
+                "Muster;"              + musterText; ...
+                "Form;"                + formText; ...
                 "Basisordner;"         + baseDir; ...
                 "Versuchsordner;"      + ordner; ...
                 "Datums-Praefix;"      + prefixRun ];
