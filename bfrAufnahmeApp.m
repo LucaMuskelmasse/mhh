@@ -77,9 +77,9 @@ gLeft.Padding       = [0 0 0 0];
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [16 3]);
+gP = uigridlayout(pnlParam, [15 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 16);
+gP.RowHeight   = repmat({'fit'}, 1, 15);
 
 uilabel(gP, 'Text','COM-Port:');
 edtCom = uieditfield(gP, 'text', 'Value','COM4');
@@ -167,15 +167,10 @@ chkFM.Layout.Column = [1 3];
 chkSpiral = uicheckbox(gP, 'Text','Spiralform (-s)');
 chkSpiral.Layout.Column = [1 3];
 
-uilabel(gP, 'Text','Datums-Praefix:');
-edtPrefix = uieditfield(gP, 'text', ...
-    'Value', char(datetime('now','Format','yyyyMMdd')));
-edtPrefix.Layout.Column = [2 3];
-
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
 lockables = [edtCom, edtInt, edtStopT, edtStopC, chkDb, edtDbLow, ...
              edtDbHigh, edtDbStep, ddCams, edtBase, edtDatum, edtInlay1, ...
-             edtInlay2, chkFM, chkSpiral, edtPrefix, btnBrowseBase];
+             edtInlay2, chkFM, chkSpiral, btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -341,7 +336,6 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             datum     = strtrim(string(edtDatum.Value));
             inlay1    = regexprep(strtrim(string(edtInlay1.Value)), '^(MV|mv)', '');
             inlay2    = regexprep(strtrim(string(edtInlay2.Value)), '^(MV|mv)', '');
-            prefixRun = strtrim(string(edtPrefix.Value));
 
             % --- Kameraauswahl fuer diesen Lauf einfrieren ---
             camSel = string(ddCams.Value);          % "beide" | "links" | "rechts"
@@ -357,6 +351,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             assert(strlength(baseDir) > 0, "Basisordner darf nicht leer sein.");
             assert(~isempty(regexp(datum, '^\d{4}-\d{2}-\d{2}$', 'once')), ...
                    "Datum bitte im Format YYYY-MM-DD angeben.");
+
+            % Datums-Praefix (YYYYMMDD) aus dem Datum ableiten (Bindestriche raus)
+            prefixRun = erase(datum, "-");
+
             if dbOnRun
                 assert(dbLowRun < dbHighRun, ...
                        "DB-Ende muss unterhalb von DB-Start liegen.");
@@ -369,7 +367,6 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             if useR
                 assert(strlength(inlay2) > 0, "Kennnummer Inlay 2 (Kamera 2) darf nicht leer sein.");
             end
-            assert(strlength(prefixRun) > 0, "Datums-Praefix darf nicht leer sein.");
 
             % --- Versuchsordner nach festem Namensschema zusammensetzen ---
             % beide : <Datum>-MV<Inlay1>-MV<Inlay2>[-FM][-s]
