@@ -14,8 +14,8 @@ function bildFolgeZusammenfuehren()
 %       <yyyyMMdd>_<HHmmss>_<Temp>.jpg
 %
 %   Vorgehen / Annahmen:
-%   * Die Ordner werden NACHEINANDER ausgewaehlt (1. = frueheste Aufnahme).
-%     Auswahl beenden: im Ordnerdialog auf "Abbrechen" klicken.
+%   * Zuerst wird die Anzahl der Ordner abgefragt (Standard 4), danach werden
+%     die Ordner NACHEINANDER ausgewaehlt (1. = frueheste Aufnahme).
 %   * Startuhrzeit des allerersten Bildes = Dateidatum (Aenderungszeit) des
 %     ersten Bildes im ersten Ordner.
 %   * Innerhalb eines Ordners: echte Zeit = Basiszeit + Sekunden-seit-Start.
@@ -27,26 +27,34 @@ function bildFolgeZusammenfuehren()
 
     NEUSTART_LUECKE_S = 30;   % Sekunden, die ein Neustart gedauert hat
 
-    % --- 1) Ordner nacheinander auswaehlen --------------------------------
-    ordnerListe = {};
+    % --- 1) Anzahl der Ordner abfragen ------------------------------------
+    antwort = inputdlg('Wie viele Ordner sollen zusammengefuehrt werden?', ...
+                       'Anzahl Ordner', 1, {'4'});
+    if isempty(antwort)
+        fprintf('Abgebrochen.\n');
+        return;
+    end
+    anzahl = str2double(antwort{1});
+    if isnan(anzahl) || anzahl < 1 || anzahl ~= round(anzahl)
+        fprintf('Ungueltige Anzahl. Abbruch.\n');
+        return;
+    end
+
+    % --- 2) Ordner nacheinander auswaehlen --------------------------------
+    ordnerListe = cell(1, anzahl);
     startPfad   = pwd;
-    while true
-        nr  = numel(ordnerListe) + 1;
-        sel = uigetdir(startPfad, sprintf('Ordner %d auswaehlen (Abbrechen = fertig)', nr));
+    for nr = 1:anzahl
+        sel = uigetdir(startPfad, sprintf('Ordner %d von %d auswaehlen', nr, anzahl));
         if isequal(sel, 0)
-            break;                       % Abbrechen -> Auswahl beenden
+            fprintf('Ordnerauswahl abgebrochen. Abbruch.\n');
+            return;
         end
-        ordnerListe{end+1} = sel;        %#ok<AGROW>
+        ordnerListe{nr} = sel;
         startPfad = fileparts(sel);      % naechster Dialog startet daneben
         fprintf('Ordner %d: %s\n', nr, sel);
     end
 
-    if isempty(ordnerListe)
-        fprintf('Keine Ordner ausgewaehlt. Abbruch.\n');
-        return;
-    end
-
-    % --- 2) Zielordner waehlen --------------------------------------------
+    % --- 3) Zielordner waehlen --------------------------------------------
     zielOrdner = uigetdir(startPfad, 'Zielordner fuer ALLE Bilder auswaehlen');
     if isequal(zielOrdner, 0)
         fprintf('Kein Zielordner ausgewaehlt. Abbruch.\n');
@@ -54,7 +62,7 @@ function bildFolgeZusammenfuehren()
     end
     if ~exist(zielOrdner, 'dir'); mkdir(zielOrdner); end
 
-    % --- 3) Ordner der Reihe nach verarbeiten -----------------------------
+    % --- 4) Ordner der Reihe nach verarbeiten -----------------------------
     basisZeit   = datetime.empty;   % Basiszeit des aktuellen Ordners
     letzteZeit  = datetime.empty;   % echte Zeit des letzten Bildes im Vorordner
     gesamtKopie = 0;
@@ -142,7 +150,7 @@ function bildFolgeZusammenfuehren()
                 char(datetime(letzteZeit,'Format','HH:mm:ss')));
     end
 
-    % --- 4) Zusammenfassung ----------------------------------------------
+    % --- 5) Zusammenfassung ----------------------------------------------
     fprintf('\nFertig. %d Bilder nach %s kopiert', gesamtKopie, zielOrdner);
     if gesamtWarn > 0
         fprintf(' (%d Warnungen/Umbenennungen, siehe oben)', gesamtWarn);
