@@ -78,9 +78,9 @@ gLeft.Padding       = [0 0 0 0];
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [16 3]);
+gP = uigridlayout(pnlParam, [17 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 16);
+gP.RowHeight   = repmat({'fit'}, 1, 17);
 
 uilabel(gP, 'Text','COM-Port:');
 edtCom = uieditfield(gP, 'text', 'Value','COM4');
@@ -88,8 +88,16 @@ edtCom.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Intervall [s]:');
 edtInt = uieditfield(gP, 'numeric', 'Value',1.0, ...
-                     'Limits',[0.05 Inf], 'LowerLimitInclusive','on');
+                     'Limits',[0.4 Inf], 'LowerLimitInclusive','on', ...
+                     'Tooltip',['Abtastintervall der Temperaturmessung. ' ...
+                                'Das Omega HH806AWE liefert 2,5 Messungen/s, ' ...
+                                'also fruehestens alle 0,4 s einen neuen Wert ' ...
+                                '-> kleinere Intervalle bringen Doppelwerte.']);
 edtInt.Layout.Column = [2 3];
+
+lblIntHint = uilabel(gP, ...
+    'Text','min. 0,4 s (Omega HH806AWE: 2,5 Messungen/s)');
+lblIntHint.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Stopp Aufw. [°C]:');
 edtStopT = uieditfield(gP, 'numeric', 'Value',70, ...
@@ -301,6 +309,8 @@ btnStop.BackgroundColor  = C.stop;
 lblTL.FontColor = C.accentL;
 lblTR.FontColor = C.accentR;
 lblState.FontColor = C.subtle;
+lblIntHint.FontColor = C.subtle;     % Latenz-Hinweis dezent
+lblIntHint.FontSize  = 11;
 
 % Achsen (Kameravorschau + Live-Plot)
 for ax = [axCamL axCamR axPlot]
