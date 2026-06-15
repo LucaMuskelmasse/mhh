@@ -70,11 +70,16 @@ gMain.RowHeight   = {'1x', 170};
 gMain.ColumnWidth = {370, '1x'};
 
 % ------------------------------ linke Spalte ------------------------------------
+% Nimmt die volle Fensterhoehe ein (beide gMain-Zeilen), damit Parameter-,
+% Steuerungs- und Zaehler-Panel untereinander Platz haben. Scrollbar, falls
+% der Parameterblock einmal hoeher wird als das Fenster -> Steuerung bleibt
+% immer erreichbar.
 gLeft = uigridlayout(gMain, [3 1]);
-gLeft.Layout.Row    = 1;
+gLeft.Layout.Row    = [1 2];
 gLeft.Layout.Column = 1;
 gLeft.RowHeight     = {'fit','fit','fit'};
 gLeft.Padding       = [0 0 0 0];
+gLeft.Scrollable    = 'on';
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
@@ -264,7 +269,7 @@ legend(axPlot, 'Location','northwest');
 % ------------------------------ Status-Log --------------------------------------
 txtLog = uitextarea(gMain, 'Editable','off', 'Value',{''});
 txtLog.Layout.Row    = 2;
-txtLog.Layout.Column = [1 2];
+txtLog.Layout.Column = 2;
 
 %% ============================ Dark-Mode-Styling =================================
 % Zentrale Farbpalette — alle Farben der App an einer Stelle.
