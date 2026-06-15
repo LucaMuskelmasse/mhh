@@ -435,8 +435,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             % Unterordner tragen die Inlay-Kennnummer der jeweiligen Seite
             % (links -> MV<Inlay1>, rechts -> MV<Inlay2>). Pro Unterordner
             % wird eine CSV-Tabelle <Praefix>-MV<Inlay>.csv angelegt, in die
-            % je gespeichertem Bild eine Zeile (Uhrzeit;Sekunden;Temperatur)
-            % geschrieben wird.
+            % je gespeichertem Bild eine Zeile (Uhrzeit;Temperatur) geschrieben
+            % wird (Uhrzeit als HHmmss, aktuelle Uhrzeit der Aufnahme).
             if exist(ordner, 'dir')
                 logMsg("Ordner existiert bereits — wird weiterverwendet: " + ordner);
             else
@@ -656,7 +656,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             if useL && trigL
-                captureSingleFrameSide(cams.left, dirLrun, t0, prefixRun, vals(1), "1", ...
+                captureSingleFrameSide(cams.left, dirLrun, prefixRun, vals(1), "1", ...
                                        "MV" + inlay1Run, csvLrun);
                 cntL = cntL + 1;
                 lblCntL.Text = num2str(cntL);
@@ -665,7 +665,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             if useR && trigR
-                captureSingleFrameSide(cams.right, dirRrun, t0, prefixRun, vals(2), "2", ...
+                captureSingleFrameSide(cams.right, dirRrun, prefixRun, vals(2), "2", ...
                                        "MV" + inlay2Run, csvRrun);
                 cntR = cntR + 1;
                 lblCntR.Text = num2str(cntR);
@@ -732,7 +732,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 fprintf(fid, '%s\n', paramLines(i));
             end
             fprintf(fid, '\n');                         % Trennzeile
-            fprintf(fid, 'Uhrzeit;Sekunden;Temperatur\n');
+            fprintf(fid, 'Uhrzeit;Temperatur\n');
             fclose(fid);
             logMsg("Bild-Tabelle angelegt: " + p);
         else
@@ -1193,10 +1193,10 @@ function u = unitName(c)
     end
 end
 
-function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, inlayLabel, csvPath)
+function captureSingleFrameSide(cam, outDir, datePrefix, temp, sideLabel, inlayLabel, csvPath)
 % CAPTURESINGLEFRAMESIDE  Speichert genau EIN Bild EINER Kamera (links ODER rechts).
 %
-% Dateiname:  <datePrefix>_<elapsed>_<temp>.jpg
+% Dateiname:  <datePrefix>_<HHmmss>_<temp>.jpg   (HHmmss = aktuelle Uhrzeit)
 % Beispiel:   20250924_123621_03-5.jpg   (Temperatur 3.5, '.' ersetzt durch '-')
 %
 % Vor dem Speichern werden Stempel ins Bild gebrannt:
@@ -1204,39 +1204,39 @@ function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, in
 %   unten rechts: Temperature: <x,x> Deg-C
 %
 % Ist csvPath angegeben, wird zusaetzlich eine Zeile
-%   Uhrzeit;Sekunden;Temperatur
-% an die Bild-Tabelle der Seite angehaengt (eine Zeile je Bild).
+%   Uhrzeit;Temperatur
+% an die Bild-Tabelle der Seite angehaengt (eine Zeile je Bild; Uhrzeit HHmmss).
 %
-%   captureSingleFrameSide(cams.left,  dirL, t0, datePrefix, vals(1), "L", "MV71-07", csvL)
-%   captureSingleFrameSide(cams.right, dirR, t0, datePrefix, vals(2), "R", "MV71-08", csvR)
+%   captureSingleFrameSide(cams.left,  dirL, datePrefix, vals(1), "1", "MV71-07", csvL)
+%   captureSingleFrameSide(cams.right, dirR, datePrefix, vals(2), "2", "MV71-08", csvR)
 %
 % Eingaben:
 %   cam        - Kamera-Objekt der gewuenschten Seite (z.B. cams.left)
 %   outDir     - Zielordner fuer diese Seite (z.B. dirL bzw. dirR)
-%   t0         - Startzeitpunkt (datetime) zur Berechnung von elapsed
-%   datePrefix - Dateinamen-Praefix (Datum zuerst)
+%   datePrefix - Datumsteil des Dateinamens (YYYYMMDD)
 %   temp       - aktuelle Temperatur dieser Seite (double, z.B. 3.5)
-%   sideLabel  - optionales Label nur fuer die Konsolenausgabe ("L"/"R")
+%   sideLabel  - optionales Label nur fuer die Konsolenausgabe ("1"/"2")
 %   inlayLabel - optionale Inlay-Kennung fuer den Stempel (z.B. "MV71-07")
 %   csvPath    - optionaler Pfad der CSV-Tabelle dieser Seite
 
-    if nargin < 6, sideLabel  = ""; end
-    if nargin < 7, inlayLabel = ""; end
-    if nargin < 8, csvPath    = ""; end
+    if nargin < 5, sideLabel  = ""; end
+    if nargin < 6, inlayLabel = ""; end
+    if nargin < 7, csvPath    = ""; end
 
-    % Vergangene Sekunden seit Start -> identisches Namensschema wie zuvor
-    elapsed = round(seconds(datetime('now') - t0));
+    % Aktueller Zeitstempel (unabhaengig vom Programmstart)
+    nowDt   = datetime('now');
+    timeStr = char(datetime(nowDt,'Format','HHmmss'));   % HHmmss fuer Dateiname/CSV
 
     % Temperatur als "03-5" formatieren: 2-stelliger Ganzzahlteil, '.' -> '-'
     tempStr = strrep(sprintf('%04.1f', temp), '.', '-');
 
-    fname = sprintf('%s_%06d_%s.jpg', datePrefix, elapsed, tempStr);
+    % Dateiname: yyyyMMdd_HHmmss_<temp>.jpg
+    fname = sprintf('%s_%s_%s.jpg', datePrefix, timeStr, tempStr);
 
     try
         % Bild aus dem Videostream holen, stempeln und speichern
         img = getsnapshot(cam);
 
-        nowDt   = datetime('now');
         stampBL = strtrim(sprintf('%s @ %s %s', ...
             char(datetime(nowDt,'Format','yyyy/MM/dd')), ...
             char(datetime(nowDt,'Format','HH:mm:ss')), char(inlayLabel)));
@@ -1247,24 +1247,21 @@ function captureSingleFrameSide(cam, outDir, t0, datePrefix, temp, sideLabel, in
         fprintf("[%s] %s gespeichert: %s\n", ...
                 datestr(now,'HH:MM:SS'), sideLabel, fname);
 
-        % --- Zeile an die Bild-Tabelle anhaengen (Fehler hier duerfen das
-        %     gespeicherte Bild nicht betreffen -> eigenes try/catch) ---
+        % --- Zeile an die Bild-Tabelle anhaengen (Uhrzeit;Temperatur) ---
+        % Fehler hier duerfen das gespeicherte Bild nicht betreffen.
         if strlength(string(csvPath)) > 0
             try
                 fid = fopen(csvPath, 'a');
                 assert(fid > 0);
-                fprintf(fid, '%s;%d;%s\n', ...
-                    char(datetime(nowDt,'Format','HH:mm:ss')), elapsed, ...
+                fprintf(fid, '%s;%s\n', timeStr, ...
                     strrep(sprintf('%.1f', temp), '.', ','));
                 fclose(fid);
             catch
-                warning("CSV-Eintrag (%s) bei t=%ds fehlgeschlagen.", ...
-                        sideLabel, elapsed);
+                warning("CSV-Eintrag (%s) fehlgeschlagen.", sideLabel);
             end
         end
     catch ME
-        warning("Aufnahme (%s) bei t=%ds fehlgeschlagen: %s", ...
-                sideLabel, elapsed, ME.message);
+        warning("Aufnahme (%s) fehlgeschlagen: %s", sideLabel, ME.message);
     end
 end
 
