@@ -7,11 +7,11 @@ function bfrAufnahmeApp
 %   letzten Ausloesewert steigt (Geraeteaufloesung 0.1 °C -> ein Bild je
 %   0.1-Grad-Schritt).
 %
-%   Optionales Deadband ("Deadband aktiv"): Ausserhalb des Feinbereichs
-%   (T <= DB-Ende oder T >= DB-Start) loest erst eine Temperaturaenderung
-%   um den DB-Schritt ein Bild aus — im Feinbereich dazwischen, in dem
-%   sich der Formgedaechtniseffekt abspielt, gilt weiterhin jeder
-%   0.1-Grad-Schritt.
+%   Deadband ("Deadband aktiv", standardmaessig an): Das Inner Band
+%   (IB-Start..IB-End) ist der Feinbereich, in dem sich der Formgedaecht-
+%   niseffekt abspielt — hier loest schon der feine IB-Schritt ein Bild
+%   aus. Im Outer Band darunter/darueber genuegt erst eine Aenderung um
+%   den groberen OB-Schritt. Inaktiv: ueberall 0.1-Grad-Schritte.
 %
 %   Mit dem Umschaltknopf "Abkühlvorgang" (waehrend des Laufs) wird die
 %   Ausloesung umgedreht: Es wird ein Foto gemacht, sobald die Temperatur
@@ -54,10 +54,11 @@ useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
 stopTrun  = 70;         % Stopp-Temperatur Aufwaermen: Ende, wenn BEIDE Kanaele >= Wert
 stopCrun  = 37;         % Stopp-Temperatur Abkuehlen:  Ende, wenn BEIDE Kanaele <= Wert
-dbOnRun   = false;      % Deadband in diesem Lauf aktiv?
-dbLowRun  = 25;         % Ende des ersten Deadband-Bereichs  (T <= Wert -> grob)
-dbHighRun = 60;         % Start des zweiten Deadband-Bereichs (T >= Wert -> grob)
-dbStepRun = 1.0;        % Schrittweite im Deadband-Bereich [°C]
+dbOnRun   = true;       % Deadband (Inner/Outer Band) in diesem Lauf aktiv?
+ibStartRun = 25;        % Inner Band Start [°C] (untere Grenze des Feinbereichs)
+ibEndRun   = 60;        % Inner Band Ende  [°C] (obere Grenze des Feinbereichs)
+ibStepRun  = 0.1;       % Schrittweite im Inner Band  [°C] (fein)
+obStepRun  = 1.0;       % Schrittweite im Outer Band  [°C] (grob)
 
 %% ================================ UI-Aufbau =====================================
 fig = uifigure('Name','BFR-Versuch — Aufnahmesteuerung', ...
@@ -77,9 +78,9 @@ gLeft.Padding       = [0 0 0 0];
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [15 3]);
+gP = uigridlayout(pnlParam, [16 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 15);
+gP.RowHeight   = repmat({'fit'}, 1, 16);
 
 uilabel(gP, 'Text','COM-Port:');
 edtCom = uieditfield(gP, 'text', 'Value','COM4');
@@ -102,31 +103,38 @@ edtStopC = uieditfield(gP, 'numeric', 'Value',37, ...
                'Kanaele <= diesem Wert sind.']);
 edtStopC.Layout.Column = [2 3];
 
-chkDb = uicheckbox(gP, 'Text','Deadband aktiv', 'Value',false, ...
-    'Tooltip',['Aktiv: ausserhalb des Feinbereichs (zwischen DB-Ende und ' ...
-               'DB-Start) loest erst eine Temperaturaenderung um den ' ...
-               'DB-Schritt ein Bild aus. Inaktiv: ueberall 0.1-Grad-Schritte.'], ...
+chkDb = uicheckbox(gP, 'Text','Deadband aktiv', 'Value',true, ...
+    'Tooltip',['Aktiv: im Inner Band (IB-Start..IB-End) gilt der feine ' ...
+               'IB-Schritt, ausserhalb (Outer Band) der grobe OB-Schritt. ' ...
+               'Inaktiv: ueberall 0.1-Grad-Schritte.'], ...
     'ValueChangedFcn', @(~,~) syncDbFields());
 chkDb.Layout.Column = [1 3];
 
-lblDbLow = uilabel(gP, 'Text','DB-Ende [°C]:');
-edtDbLow = uieditfield(gP, 'numeric', 'Value',25, ...
-    'Tooltip',['Bis zu dieser Temperatur gilt das erste Deadband ' ...
-               '(grobe Schritte); darueber beginnt der Feinbereich.']);
-edtDbLow.Layout.Column = [2 3];
+lblIbStart = uilabel(gP, 'Text','IB-Start [°C]:');
+edtIbStart = uieditfield(gP, 'numeric', 'Value',25, ...
+    'Tooltip',['Untere Grenze des Inner Bands (Feinbereich, ' ...
+               'Formgedaechtniseffekt). Darunter gilt das Outer Band.']);
+edtIbStart.Layout.Column = [2 3];
 
-lblDbHigh = uilabel(gP, 'Text','DB-Start [°C]:');
-edtDbHigh = uieditfield(gP, 'numeric', 'Value',60, ...
-    'Tooltip',['Ab dieser Temperatur gilt das zweite Deadband ' ...
-               '(grobe Schritte); darunter endet der Feinbereich.']);
-edtDbHigh.Layout.Column = [2 3];
+lblIbEnd = uilabel(gP, 'Text','IB-End [°C]:');
+edtIbEnd = uieditfield(gP, 'numeric', 'Value',60, ...
+    'Tooltip',['Obere Grenze des Inner Bands (Feinbereich, ' ...
+               'Formgedaechtniseffekt). Darueber gilt das Outer Band.']);
+edtIbEnd.Layout.Column = [2 3];
 
-lblDbStep = uilabel(gP, 'Text','DB-Schritt [°C]:');
-edtDbStep = uieditfield(gP, 'numeric', 'Value',1.0, 'Limits',[0 Inf], ...
+lblIbStep = uilabel(gP, 'Text','IB-Schritt [°C]:');
+edtIbStep = uieditfield(gP, 'numeric', 'Value',0.1, 'Limits',[0 Inf], ...
     'LowerLimitInclusive','off', ...
-    'Tooltip',['Schrittweite im Deadband-Bereich: Bild erst, wenn sich die ' ...
+    'Tooltip',['Schrittweite im Inner Band: Bild erst, wenn sich die ' ...
                'Temperatur seit dem letzten Bild um diesen Wert geaendert hat.']);
-edtDbStep.Layout.Column = [2 3];
+edtIbStep.Layout.Column = [2 3];
+
+lblObStep = uilabel(gP, 'Text','OB-Schritt [°C]:');
+edtObStep = uieditfield(gP, 'numeric', 'Value',1.0, 'Limits',[0 Inf], ...
+    'LowerLimitInclusive','off', ...
+    'Tooltip',['Schrittweite im Outer Band (ausserhalb IB-Start..IB-End): ' ...
+               'Bild erst nach einer Aenderung um diesen Wert.']);
+edtObStep.Layout.Column = [2 3];
 
 % Deadband-Felder passend zum Haekchen ein-/ausblenden (Initialzustand)
 syncDbFields();
@@ -168,9 +176,9 @@ chkSpiral = uicheckbox(gP, 'Text','Spiralform (-s)');
 chkSpiral.Layout.Column = [1 3];
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
-lockables = [edtCom, edtInt, edtStopT, edtStopC, chkDb, edtDbLow, ...
-             edtDbHigh, edtDbStep, ddCams, edtBase, edtDatum, edtInlay1, ...
-             edtInlay2, chkFM, chkSpiral, btnBrowseBase];
+lockables = [edtCom, edtInt, edtStopT, edtStopC, chkDb, edtIbStart, ...
+             edtIbEnd, edtIbStep, edtObStep, ddCams, edtBase, edtDatum, ...
+             edtInlay1, edtInlay2, chkFM, chkSpiral, btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -328,10 +336,11 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             intervall = edtInt.Value;
             stopTrun  = edtStopT.Value;
             stopCrun  = edtStopC.Value;
-            dbOnRun   = logical(chkDb.Value);
-            dbLowRun  = edtDbLow.Value;
-            dbHighRun = edtDbHigh.Value;
-            dbStepRun = edtDbStep.Value;
+            dbOnRun    = logical(chkDb.Value);
+            ibStartRun = edtIbStart.Value;
+            ibEndRun   = edtIbEnd.Value;
+            ibStepRun  = edtIbStep.Value;
+            obStepRun  = edtObStep.Value;
             baseDir   = strtrim(string(edtBase.Value));
             datum     = strtrim(string(edtDatum.Value));
             inlay1    = regexprep(strtrim(string(edtInlay1.Value)), '^(MV|mv)', '');
@@ -356,9 +365,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             prefixRun = erase(datum, "-");
 
             if dbOnRun
-                assert(dbLowRun < dbHighRun, ...
-                       "DB-Ende muss unterhalb von DB-Start liegen.");
-                assert(dbStepRun > 0, "DB-Schritt muss > 0 sein.");
+                assert(ibStartRun < ibEndRun, ...
+                       "IB-Start muss unterhalb von IB-End liegen.");
+                assert(ibStepRun > 0, "IB-Schritt muss > 0 sein.");
+                assert(obStepRun > 0, "OB-Schritt muss > 0 sein.");
             end
             % Nur die Inlays der aktiven Seite(n) sind Pflicht
             if useL
@@ -418,9 +428,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 "Stopp Aufwaermen [Grad C];" + n1(stopTrun); ...
                 "Stopp Abkuehlen [Grad C];"  + n1(stopCrun); ...
                 "Deadband aktiv;"      + jaNein(dbOnRun); ...
-                "DB-Ende [Grad C];"    + n1(dbLowRun); ...
-                "DB-Start [Grad C];"   + n1(dbHighRun); ...
-                "DB-Schritt [Grad C];" + n1(dbStepRun); ...
+                "IB-Start [Grad C];"   + n1(ibStartRun); ...
+                "IB-End [Grad C];"     + n1(ibEndRun); ...
+                "IB-Schritt [Grad C];" + n1(ibStepRun); ...
+                "OB-Schritt [Grad C];" + n1(obStepRun); ...
                 "Kameras;"             + camLabel(); ...
                 "Datum;"               + datum; ...
                 "Inlay 1 (Kamera 1);" + inl1Str; ...
@@ -496,8 +507,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             lamp.Color     = [0 0.8 0];
             lblState.Text  = 'läuft (Aufwärmen)';
             if dbOnRun
-                dbInfo = sprintf('Deadband %.1f °C (grob bei T <= %.1f und T >= %.1f °C)', ...
-                                 dbStepRun, dbLowRun, dbHighRun);
+                dbInfo = sprintf(['Deadband: Inner Band %.1f..%.1f °C Schritt %.1f °C, ' ...
+                                  'Outer Band Schritt %.1f °C'], ...
+                                 ibStartRun, ibEndRun, ibStepRun, obStepRun);
             else
                 dbInfo = 'Deadband inaktiv (ueberall 0.1-Grad-Schritte)';
             end
@@ -583,15 +595,23 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             % --- Ausloeselogik ---
-            % Feinbereich (DB-Ende < T < DB-Start bzw. Deadband inaktiv):
-            %   jeder 0.1-Grad-Schritt loest aus.
-            % Deadband-Bereich (T <= DB-Ende oder T >= DB-Start, nur wenn
-            %   Deadband aktiv): erst eine Aenderung um DB-Schritt loest aus.
+            % Deadband aktiv: im Inner Band (IB-Start <= T <= IB-End) gilt der
+            %   feine IB-Schritt, im Outer Band (T < IB-Start oder T > IB-End)
+            %   der grobe OB-Schritt -> Bild erst nach Aenderung um diesen Wert.
+            % Deadband inaktiv: ueberall jeder 0.1-Grad-Schritt (step = 0).
             % Richtung je Modus: Aufwaermen -> Anstieg, Abkuehlen -> Abfall.
             stepL = 0;  stepR = 0;            % 0 -> jeder Schritt loest aus
             if dbOnRun
-                if vals(1) <= dbLowRun || vals(1) >= dbHighRun, stepL = dbStepRun; end
-                if vals(2) <= dbLowRun || vals(2) >= dbHighRun, stepR = dbStepRun; end
+                if vals(1) < ibStartRun || vals(1) > ibEndRun
+                    stepL = obStepRun;        % Outer Band -> grob
+                else
+                    stepL = ibStepRun;        % Inner Band -> fein
+                end
+                if vals(2) < ibStartRun || vals(2) > ibEndRun
+                    stepR = obStepRun;
+                else
+                    stepR = ibStepRun;
+                end
             end
             eps0 = 1e-9;                      % Toleranz gegen Rundungsfehler
             if cooling
@@ -696,8 +716,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         % Graut die Deadband-Felder passend zum Haekchen ein/aus.
         % Werte bleiben dabei erhalten (nur Enable wird umgeschaltet).
         if chkDb.Value, st = 'on'; else, st = 'off'; end
-        set([lblDbLow edtDbLow lblDbHigh edtDbHigh lblDbStep edtDbStep], ...
-            'Enable', st);
+        set([lblIbStart edtIbStart lblIbEnd edtIbEnd ...
+             lblIbStep edtIbStep lblObStep edtObStep], 'Enable', st);
     end
 
     function setInlay(lbl, edt, on)
