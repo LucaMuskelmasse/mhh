@@ -404,18 +404,45 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 assert(okMk, "Versuchsordner konnte nicht erstellt werden: " + string(msgMk));
                 logMsg("Versuchsordner erstellt: " + ordner);
             end
+            % --- Gewaehlte Parameter fuer den CSV-Kopf zusammenstellen ---
+            % Komma als Dezimaltrenner (passend zu den Tabellenzeilen / DE-Excel),
+            % Einheit als "Grad C" statt °C, damit die Datei encoding-unabhaengig
+            % sauber bleibt.
+            n1 = @(x) strrep(sprintf('%.1f', x), '.', ',');
+            inl1Str = "(nicht verwendet)";  if useL, inl1Str = "MV" + inlay1; end
+            inl2Str = "(nicht verwendet)";  if useR, inl2Str = "MV" + inlay2; end
+            paramLines = [ ...
+                "Parameter;Wert"; ...
+                "COM-Port;"            + port; ...
+                "Intervall [s];"       + strrep(sprintf('%.2f', intervall), '.', ','); ...
+                "Stopp Aufwaermen [Grad C];" + n1(stopTrun); ...
+                "Stopp Abkuehlen [Grad C];"  + n1(stopCrun); ...
+                "Deadband aktiv;"      + jaNein(dbOnRun); ...
+                "DB-Ende [Grad C];"    + n1(dbLowRun); ...
+                "DB-Start [Grad C];"   + n1(dbHighRun); ...
+                "DB-Schritt [Grad C];" + n1(dbStepRun); ...
+                "Kameras;"             + camLabel(); ...
+                "Datum;"               + datum; ...
+                "Inlay 1 (Kamera 1);" + inl1Str; ...
+                "Inlay 2 (Kamera 2);" + inl2Str; ...
+                "Funktionsmuster (-FM);" + jaNein(chkFM.Value); ...
+                "Spiralform (-s);"     + jaNein(chkSpiral.Value); ...
+                "Basisordner;"         + baseDir; ...
+                "Versuchsordner;"      + ordner; ...
+                "Datums-Praefix;"      + prefixRun ];
+
             dirLrun = string(fullfile(ordner, "MV" + inlay1));
             dirRrun = string(fullfile(ordner, "MV" + inlay2));
             csvLrun = "";  csvRrun = "";
             if useL
                 if ~exist(dirLrun, 'dir'), mkdir(dirLrun); end
                 csvLrun = string(fullfile(dirLrun, prefixRun + "-MV" + inlay1 + ".csv"));
-                initCsv(csvLrun);
+                initCsv(csvLrun, paramLines);
             end
             if useR
                 if ~exist(dirRrun, 'dir'), mkdir(dirRrun); end
                 csvRrun = string(fullfile(dirRrun, prefixRun + "-MV" + inlay2 + ".csv"));
-                initCsv(csvRrun);
+                initCsv(csvRrun, paramLines);
             end
 
             % UI sperren
@@ -640,18 +667,29 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         setInlay(lblInlay2, edtInlay2, wantR);
     end
 
-    function initCsv(p)
-        % Legt die Bild-Tabelle an (Spaltenkopf), falls sie noch nicht existiert.
-        % Semikolon-getrennt, damit sie sich direkt in (deutschem) Excel oeffnet.
+    function initCsv(p, paramLines)
+        % Legt die Bild-Tabelle an, falls sie noch nicht existiert: zuerst die
+        % gewaehlten Parameter (je Zeile "Name;Wert"), eine Leerzeile, dann der
+        % Spaltenkopf der Tabelle. Semikolon-getrennt -> oeffnet direkt in
+        % (deutschem) Excel. Bei Wiederverwendung wird NICHT erneut geschrieben.
         if ~exist(p, 'file')
             fid = fopen(p, 'w');
             assert(fid > 0, "CSV-Datei konnte nicht erstellt werden: " + p);
+            for i = 1:numel(paramLines)
+                fprintf(fid, '%s\n', paramLines(i));
+            end
+            fprintf(fid, '\n');                         % Trennzeile
             fprintf(fid, 'Uhrzeit;Sekunden;Temperatur\n');
             fclose(fid);
             logMsg("Bild-Tabelle angelegt: " + p);
         else
             logMsg("Bild-Tabelle existiert bereits — wird fortgefuehrt: " + p);
         end
+    end
+
+    function r = jaNein(b)
+        % Logischen Wert als "ja"/"nein" fuer den CSV-Parameterblock
+        if b, r = "ja"; else, r = "nein"; end
     end
 
     function syncDbFields()
