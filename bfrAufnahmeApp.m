@@ -1273,6 +1273,15 @@ function img = stampImage(img, txtBL, txtBR)
 % installiert, rendert ein Fallback den Text ueber eine unsichtbare Figure.
 % Schlaegt auch das fehl, wird das Bild UNGESTEMPELT zurueckgegeben — der
 % Stempel darf das Speichern der Aufnahme nie verhindern.
+    persistent methodLogged
+    if isempty(methodLogged)
+        if exist('insertText','file')
+            fprintf('Bildstempel-Methode: insertText (Computer Vision Toolbox).\n');
+        else
+            fprintf('Bildstempel-Methode: Fallback-Renderer (ohne Computer Vision Toolbox).\n');
+        end
+        methodLogged = true;
+    end
     try
         H    = size(img,1);  W = size(img,2);
         fs   = max(14, round(H/42));        % Schriftgroesse an Bildhoehe koppeln
@@ -1304,6 +1313,7 @@ function strip = renderTextStrip(txt, fontPx)
         hFig = figure('Visible','off', 'Units','pixels', ...
                       'Position',[50 50 1200 120], 'Color','k', ...
                       'MenuBar','none', 'ToolBar','none', ...
+                      'InvertHardcopy','off', ...   % schwarzen Hintergrund behalten
                       'IntegerHandle','off', 'HandleVisibility','off');
         hAx  = axes('Parent',hFig, 'Units','normalized', 'Position',[0 0 1 1], ...
                     'Visible','off', 'XLim',[0 1200], 'YLim',[0 120]);
@@ -1314,8 +1324,11 @@ function strip = renderTextStrip(txt, fontPx)
     hTxt.FontSize = fontPx;
     hTxt.String   = txt;
 
-    fr   = getframe(hFig);
-    A    = fr.cdata;
+    % WICHTIG: print('-RGBImage') statt getframe. getframe haeuft in langen
+    % Timer-Schleifen ueber tausende Aufrufe Speicher an (bekannte Leckquelle)
+    % -> Absturz nach laengerer Laufzeit. print rendert dieselbe Figure
+    % leckfrei offscreen (InvertHardcopy='off' erhaelt den schwarzen Grund).
+    A    = print(hFig, '-RGBImage', '-r0');
     mask = any(A > 40, 3);                  % Pixel mit Textanteil
     rows = find(any(mask,2));  cols = find(any(mask,1));
     if isempty(rows)                        % nichts gerendert -> leerer Kasten
