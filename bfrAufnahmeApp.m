@@ -516,6 +516,24 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             % Externe Vorschaufenster schliessen und Streams in die App umleiten
             attachPreviews();
 
+            % --- Bildstempel-Schrift einmalig vorbereiten ---
+            % Nur noetig, wenn der Fallback-Renderer aktiv ist (ohne Computer
+            % Vision Toolbox). Vorab gebaut, damit die erste Aufnahme nicht
+            % durch den (einmaligen) Atlas-Aufbau verzoegert wird.
+            if ~exist('insertText','file')
+                try
+                    vres = [];
+                    if useL && ~isempty(cams.left),  vres = cams.left.VideoResolution;
+                    elseif useR && ~isempty(cams.right), vres = cams.right.VideoResolution;
+                    end
+                    if ~isempty(vres)
+                        glyphAtlas(max(14, round(double(vres(2))/42)));
+                        logMsg("Bildstempel-Schrift vorbereitet.");
+                    end
+                catch
+                end
+            end
+
             % --- Laufzustand initialisieren ---
             t0    = datetime('now');
             prevL = -Inf;  prevR = -Inf;
@@ -1270,9 +1288,10 @@ function img = stampImage(img, txtBL, txtBR)
 % (weisse Schrift auf schwarzem Kasten).
 %
 % Bevorzugt insertText (Computer Vision Toolbox); ist die Toolbox nicht
-% installiert, rendert ein Fallback den Text ueber eine unsichtbare Figure.
-% Schlaegt auch das fehl, wird das Bild UNGESTEMPELT zurueckgegeben — der
-% Stempel darf das Speichern der Aufnahme nie verhindern.
+% installiert, setzt ein Fallback den Text aus einem EINMALIG gebauten
+% Glyphen-Atlas zusammen (kein Grafik-Rendern pro Bild -> kein Leck).
+% Schlaegt das fehl, wird das Bild UNGESTEMPELT gespeichert — der Stempel
+% darf das Speichern der Aufnahme nie verhindern.
     persistent methodLogged
     if isempty(methodLogged)
         if exist('insertText','file')
@@ -1295,8 +1314,10 @@ function img = stampImage(img, txtBL, txtBR)
                 'TextColor','white', 'BoxColor','black', 'BoxOpacity',1, ...
                 'AnchorPoint','RightBottom');
         else
-            img = blitLabel(img, renderTextStrip(txtBL, fs), 'sw', marg);
-            img = blitLabel(img, renderTextStrip(txtBR, fs), 'se', marg);
+            sBL = renderTextStrip(txtBL, fs);
+            sBR = renderTextStrip(txtBR, fs);
+            if ~isempty(sBL), img = blitLabel(img, sBL, 'sw', marg); end
+            if ~isempty(sBR), img = blitLabel(img, sBR, 'se', marg); end
         end
     catch ME
         warning('Bildstempel fehlgeschlagen (%s) — Bild wird ungestempelt gespeichert.', ...
@@ -1305,40 +1326,94 @@ function img = stampImage(img, txtBL, txtBR)
 end
 
 function strip = renderTextStrip(txt, fontPx)
-% Rendert weissen Text auf schwarzem Grund als RGB-Streifen (uint8).
-% Nutzt eine persistente unsichtbare Figure, damit pro Bild nur der Text
-% aktualisiert und gerendert werden muss.
-    persistent hFig hTxt
-    if isempty(hFig) || ~ishghandle(hFig)
-        hFig = figure('Visible','off', 'Units','pixels', ...
-                      'Position',[50 50 1200 120], 'Color','k', ...
-                      'MenuBar','none', 'ToolBar','none', ...
-                      'InvertHardcopy','off', ...   % schwarzen Hintergrund behalten
-                      'IntegerHandle','off', 'HandleVisibility','off');
-        hAx  = axes('Parent',hFig, 'Units','normalized', 'Position',[0 0 1 1], ...
-                    'Visible','off', 'XLim',[0 1200], 'YLim',[0 120]);
-        hTxt = text(hAx, 10, 60, '', 'Color','w', 'FontUnits','pixels', ...
-                    'FontName','Consolas', 'Interpreter','none', ...
-                    'VerticalAlignment','middle');
-    end
-    hTxt.FontSize = fontPx;
-    hTxt.String   = txt;
+% Setzt den Textstreifen aus einem EINMALIG gebauten Glyphen-Atlas zusammen
+% (eine Bitmap je Zeichen). Dadurch braucht es pro gespeichertem Bild KEINE
+% Figure und KEIN print/getframe mehr -> kein Speicherleck in der Schleife.
+% Rueckgabe: RGB-uint8 (weisse Schrift auf schwarz) oder [] (nicht baubar).
+    atlas = glyphAtlas(fontPx);
+    if isempty(atlas), strip = []; return; end
 
-    % WICHTIG: print('-RGBImage') statt getframe. getframe haeuft in langen
-    % Timer-Schleifen ueber tausende Aufrufe Speicher an (bekannte Leckquelle)
-    % -> Absturz nach laengerer Laufzeit. print rendert dieselbe Figure
-    % leckfrei offscreen (InvertHardcopy='off' erhaelt den schwarzen Grund).
-    A    = print(hFig, '-RGBImage', '-r0');
-    mask = any(A > 40, 3);                  % Pixel mit Textanteil
-    rows = find(any(mask,2));  cols = find(any(mask,1));
-    if isempty(rows)                        % nichts gerendert -> leerer Kasten
-        strip = zeros(2*fontPx, 4*fontPx, 3, 'uint8');
-        return;
+    H     = atlas.cellH;
+    gap   = max(1, round(0.10*fontPx));     % Spalt zwischen Glyphen
+    spW   = atlas.spaceWidth;
+    chars = char(txt);
+
+    parts = {};
+    for i = 1:numel(chars)
+        key = double(chars(i));
+        if chars(i) == ' '
+            g = zeros(H, spW, 'uint8');
+        elseif key >= 33 && key <= 126 && ~isempty(atlas.glyphs{key})
+            g = atlas.glyphs{key};
+        else
+            g = zeros(H, spW, 'uint8');      % unbekanntes Zeichen -> Leerraum
+        end
+        parts{end+1} = g;                                  %#ok<AGROW>
+        if i < numel(chars)
+            parts{end+1} = zeros(H, gap, 'uint8');         %#ok<AGROW>
+        end
     end
-    pad = round(0.4*fontPx);                % schwarzer Rand um den Text
-    r1 = max(1, rows(1)-pad);  r2 = min(size(A,1), rows(end)+pad);
-    c1 = max(1, cols(1)-pad);  c2 = min(size(A,2), cols(end)+pad);
-    strip = A(r1:r2, c1:c2, :);
+    band = [parts{:}];
+    if isempty(band), strip = []; return; end
+
+    pad  = max(2, round(0.25*fontPx));       % schwarzer Rand um den Text
+    band = [zeros(pad,size(band,2),'uint8'); band; zeros(pad,size(band,2),'uint8')];
+    band = [zeros(size(band,1),pad,'uint8'), band, zeros(size(band,1),pad,'uint8')];
+    strip = repmat(band, 1, 1, 3);           % RGB: weisse Schrift auf schwarz
+end
+
+function atlas = glyphAtlas(fontPx)
+% Baut EINMALIG je Schriftgroesse einen Glyphen-Atlas: rendert jedes Zeichen
+% genau einmal offscreen (begrenzte Anzahl print-Aufrufe, einmalig) und legt
+% die Bitmaps ab. Die laufende Stempel-Schleife kommt danach voellig ohne
+% Grafik-Operationen aus. Ergebnis wird persistent zwischengespeichert (auch
+% ein Fehlschlag, damit nicht bei jedem Bild neu gebaut wird).
+    persistent A keyPx
+    if ~isempty(keyPx) && keyPx == fontPx
+        atlas = A; return;
+    end
+    keyPx = fontPx;  A = [];                 % nur EIN Bauversuch je Groesse
+
+    try
+        f = figure('Visible','off','Units','pixels', ...
+                   'Position',[50 50 round(10*fontPx) round(3*fontPx)], ...
+                   'Color','k','MenuBar','none','ToolBar','none', ...
+                   'InvertHardcopy','off','IntegerHandle','off','HandleVisibility','off');
+        cu = onCleanup(@() delete(f));       %#ok<NASGU>  Figure sicher schliessen
+        ax = axes('Parent',f,'Units','normalized','Position',[0 0 1 1], ...
+                  'Visible','off','XLim',[0 1],'YLim',[0 1]);
+        ht = text(ax, 0.02, 0.5, '', 'Units','normalized','Color','w', ...
+                  'FontUnits','pixels','FontSize',fontPx,'FontName','Consolas', ...
+                  'Interpreter','none','VerticalAlignment','middle', ...
+                  'HorizontalAlignment','left');
+        thr = 40;
+
+        % Gemeinsames vertikales Band (Referenz mit Ascender + Descender)
+        ht.String = 'AQ0gjpqy';
+        ref = max(print(f,'-RGBImage','-r0'), [], 3);
+        rr  = find(any(ref > thr, 2));
+        if isempty(rr), return; end
+        y1 = rr(1);  y2 = rr(end);
+
+        glyphs = cell(1,126);
+        widths = [];
+        for key = 33:126
+            ht.String = char(key);
+            gi = max(print(f,'-RGBImage','-r0'), [], 3);
+            if size(gi,1) < y2, continue; end
+            cc = find(any(gi(y1:y2,:) > thr, 1));
+            if isempty(cc), continue; end
+            glyphs{key} = gi(y1:y2, cc(1):cc(end));
+            widths(end+1) = cc(end) - cc(1) + 1;           %#ok<AGROW>
+        end
+        if isempty(widths), return; end
+
+        A = struct('glyphs',{glyphs}, 'cellH',(y2-y1+1), ...
+                   'spaceWidth',max(3, round(median(widths))));
+    catch
+        A = [];                              % Fehler -> kein Atlas (Stempel entfaellt)
+    end
+    atlas = A;
 end
 
 function img = blitLabel(img, strip, corner, marg)
