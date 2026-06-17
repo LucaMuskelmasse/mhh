@@ -822,24 +822,27 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function attachPreviews()
-        % Leitet die kontinuierliche Live-Vorschau der aktiven Kameras in die
-        % App-Achsen um, schliesst die externen Fenster aus openDinoLiteCameras
-        % und markiert die Achsen inaktiver Seiten.
+        % Leitet die Live-Vorschau der aktiven Kameras in die App-Achsen um,
+        % schliesst die externen Fenster aus openDinoLiteCameras und markiert
+        % die Achsen inaktiver Seiten.
         %
-        % HINWEIS: Die kontinuierliche preview() ist bewusst wieder aktiv — sie
-        % haelt den Kamera-Stream und damit die Auto-Belichtung am Laufen.
-        % (Eine snapshot-basierte Vorschau lieferte ueberbelichtete Bilder, weil
-        % die Belichtung ohne Dauerstream nicht einschwingt.)
+        % WICHTIG (Speicher): Die Kamera streamt mit voller Rate weiter (damit
+        % die Auto-Belichtung korrekt bleibt), aber das ANGEZEIGTE Bild wird
+        % per gedrosseltem UpdatePreviewWindowFcn nur ~2-3x/s aktualisiert.
+        % Bei voller Rate stapeln sich die Frames sonst im GUI-Renderer
+        % (matlabwindowhelper.exe) und der RAM laeuft voll -> Absturz.
         stoppreview(activeCams());
         delete(findall(0, 'Type','figure', 'Tag','bfrPreview'));
         if useL
             hImL = makePreviewImage(axCamL, cams.left);
+            setappdata(hImL, 'UpdatePreviewWindowFcn', @throttledPreviewUpdate);
             preview(cams.left, hImL);
         else
             showInactive(axCamL);
         end
         if useR
             hImR = makePreviewImage(axCamR, cams.right);
+            setappdata(hImR, 'UpdatePreviewWindowFcn', @throttledPreviewUpdate);
             preview(cams.right, hImR);
         else
             showInactive(axCamR);
@@ -942,6 +945,24 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
 end % ================================ Ende App =====================================
+
+
+function throttledPreviewUpdate(~, event, himage)
+% THROTTLEDPREVIEWUPDATE  Gedrosselte Vorschau-Aktualisierung fuer preview().
+% Die Kamera streamt mit voller Rate weiter (Auto-Belichtung bleibt korrekt),
+% aber das angezeigte Bild wird nur jedes N-te Frame aktualisiert. So gelangen
+% pro Sekunde nur ~2-3 statt ~30 Frames in den GUI-Renderer
+% (matlabwindowhelper.exe) -> dessen Speicheraufbau wird drastisch gebremst.
+    try
+        c = getappdata(himage, 'frameSkip');
+        if isempty(c) || c <= 0
+            himage.CData = event.Data;       % dieses Frame anzeigen
+            c = 12;                          % danach 11 Frames ueberspringen
+        end
+        setappdata(himage, 'frameSkip', c - 1);
+    catch
+    end
+end
 
 
 %% ###############################################################################
