@@ -32,9 +32,6 @@ function bfrAufnahmeApp
 %% ================= Geteilter Zustand (nested-function Workspace) =================
 s        = [];          % serialport-Objekt (waehrend eines Laufs offen)
 cams     = [];          % struct mit Feldern .left / .right (videoinput)
-hPrevL   = [];          % image-Handle der App-Vorschau Kamera 1
-hPrevR   = [];          % image-Handle der App-Vorschau Kamera 2
-tPrevUpd = NaT;         % Zeitpunkt der letzten Vorschau-Aktualisierung
 tMemLog  = NaT;         % Zeitpunkt der letzten Speicher-Logzeile
 tmr      = [];          % timer-Objekt fuer die Messschleife
 t0       = NaT;         % Startzeitpunkt des Laufs
@@ -695,11 +692,6 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 prevR = vals(2);            % nur bei Ausloesung aktualisieren
             end
 
-            % --- Vorschaubild nur ca. alle 2 s aktualisieren (entlastet HW) ---
-            if isnat(tPrevUpd) || seconds(datetime('now') - tPrevUpd) >= 2
-                updatePreviews();
-            end
-
             % --- Speicherverbrauch periodisch protokollieren (Diagnose) ---
             logMemoryUsage(false);
 
@@ -830,49 +822,33 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function attachPreviews()
-        % Bereitet die App-Vorschau der aktiven Kameras vor und schliesst die
-        % externen Fenster aus openDinoLiteCameras.
+        % Leitet die kontinuierliche Live-Vorschau der aktiven Kameras in die
+        % App-Achsen um, schliesst die externen Fenster aus openDinoLiteCameras
+        % und markiert die Achsen inaktiver Seiten.
         %
-        % WICHTIG (Speicher/Last): Es wird KEINE kontinuierliche preview() mehr
-        % gestartet. Die kontinuierliche Live-Vorschau beider Kameras rendert
-        % mit voller Kamera-Bildrate ueber den gesamten (langen) Lauf und ist
-        % der groesste Dauerverbraucher auf schwacher Hardware. Stattdessen wird
-        % das Vorschaubild nur periodisch per getsnapshot aktualisiert (siehe
-        % updatePreviews) — das genuegt zum Beobachten eines langsamen
-        % Thermovorgangs und entlastet RAM/CPU deutlich.
+        % HINWEIS: Die kontinuierliche preview() ist bewusst wieder aktiv — sie
+        % haelt den Kamera-Stream und damit die Auto-Belichtung am Laufen.
+        % (Eine snapshot-basierte Vorschau lieferte ueberbelichtete Bilder, weil
+        % die Belichtung ohne Dauerstream nicht einschwingt.)
         stoppreview(activeCams());
         delete(findall(0, 'Type','figure', 'Tag','bfrPreview'));
-        hPrevL = [];  hPrevR = [];
         if useL
-            hPrevL = makePreviewImage(axCamL, cams.left);
+            hImL = makePreviewImage(axCamL, cams.left);
+            preview(cams.left, hImL);
         else
             showInactive(axCamL);
         end
         if useR
-            hPrevR = makePreviewImage(axCamR, cams.right);
+            hImR = makePreviewImage(axCamR, cams.right);
+            preview(cams.right, hImR);
         else
             showInactive(axCamR);
         end
 
+        % Der Neustart der Vorschau schaltet die Dino-Lite-LEDs wieder ein
+        % -> nach kurzem Anlaufen erneut ausschalten.
+        pause(0.5); drawnow;
         ledsOff(false);
-        tPrevUpd = NaT;
-        updatePreviews();              % erstes Bild sofort anzeigen
-    end
-
-    function updatePreviews()
-        % Aktualisiert die App-Vorschaubilder der aktiven Kameras per
-        % getsnapshot (kein dauerhafter Stream). Fehler hier sind unkritisch.
-        try
-            if useL && ~isempty(hPrevL) && isvalid(hPrevL)
-                hPrevL.CData = getsnapshot(cams.left);
-            end
-        catch, end
-        try
-            if useR && ~isempty(hPrevR) && isvalid(hPrevR)
-                hPrevR.CData = getsnapshot(cams.right);
-            end
-        catch, end
-        tPrevUpd = datetime('now');
     end
 
     function ledsOff(verbose)
