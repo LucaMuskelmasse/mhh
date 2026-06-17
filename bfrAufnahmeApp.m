@@ -32,6 +32,10 @@ function bfrAufnahmeApp
 %% ================= Geteilter Zustand (nested-function Workspace) =================
 s        = [];          % serialport-Objekt (waehrend eines Laufs offen)
 cams     = [];          % struct mit Feldern .left / .right (videoinput)
+hPrevL   = [];          % image-Handle der App-Vorschau Kamera 1
+hPrevR   = [];          % image-Handle der App-Vorschau Kamera 2
+tPrevUpd = NaT;         % Zeitpunkt der letzten Vorschau-Aktualisierung
+tMemLog  = NaT;         % Zeitpunkt der letzten Speicher-Logzeile
 tmr      = [];          % timer-Objekt fuer die Messschleife
 t0       = NaT;         % Startzeitpunkt des Laufs
 prevL    = -Inf;        % letzter Ausloesewert links
@@ -691,9 +695,34 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 prevR = vals(2);            % nur bei Ausloesung aktualisieren
             end
 
+            % --- Vorschaubild nur ca. alle 2 s aktualisieren (entlastet HW) ---
+            if isnat(tPrevUpd) || seconds(datetime('now') - tPrevUpd) >= 2
+                updatePreviews();
+            end
+
+            % --- Speicherverbrauch periodisch protokollieren (Diagnose) ---
+            logMemoryUsage(false);
+
             drawnow limitrate;
         catch ME
             logMsg("Fehler im Messzyklus: " + string(ME.message));
+        end
+    end
+
+    function logMemoryUsage(force)
+        % Schreibt ca. alle 30 s den von MATLAB belegten Speicher ins Log,
+        % damit ein etwaiges Anwachsen sichtbar wird (nur Windows: 'memory').
+        if nargin < 1, force = false; end
+        if ~force && ~isnat(tMemLog) && seconds(datetime('now') - tMemLog) < 30
+            return;
+        end
+        tMemLog = datetime('now');
+        try
+            m = memory;                                  % nur Windows
+            logMsg(sprintf("Speicher (MATLAB): %.0f MB belegt.", ...
+                           m.MemUsedMATLAB / 1e6));
+        catch
+            % 'memory' nicht verfuegbar (z.B. Nicht-Windows) -> still ignorieren
         end
     end
 
@@ -801,28 +830,49 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function attachPreviews()
-        % Leitet die Live-Vorschau der aktiven Kameras in die App-Achsen um,
-        % schliesst die von openDinoLiteCameras erzeugten externen Fenster und
-        % markiert die Achsen inaktiver Seiten.
+        % Bereitet die App-Vorschau der aktiven Kameras vor und schliesst die
+        % externen Fenster aus openDinoLiteCameras.
+        %
+        % WICHTIG (Speicher/Last): Es wird KEINE kontinuierliche preview() mehr
+        % gestartet. Die kontinuierliche Live-Vorschau beider Kameras rendert
+        % mit voller Kamera-Bildrate ueber den gesamten (langen) Lauf und ist
+        % der groesste Dauerverbraucher auf schwacher Hardware. Stattdessen wird
+        % das Vorschaubild nur periodisch per getsnapshot aktualisiert (siehe
+        % updatePreviews) — das genuegt zum Beobachten eines langsamen
+        % Thermovorgangs und entlastet RAM/CPU deutlich.
         stoppreview(activeCams());
         delete(findall(0, 'Type','figure', 'Tag','bfrPreview'));
+        hPrevL = [];  hPrevR = [];
         if useL
-            hImL = makePreviewImage(axCamL, cams.left);
-            preview(cams.left, hImL);      % fluessiger Stream, getrennt vom
-        else                               % getsnapshot beim Speichern
+            hPrevL = makePreviewImage(axCamL, cams.left);
+        else
             showInactive(axCamL);
         end
         if useR
-            hImR = makePreviewImage(axCamR, cams.right);
-            preview(cams.right, hImR);
+            hPrevR = makePreviewImage(axCamR, cams.right);
         else
             showInactive(axCamR);
         end
 
-        % WICHTIG: Der Neustart der Vorschau schaltet die Dino-Lite-LEDs
-        % automatisch wieder ein -> nach kurzem Anlaufen erneut ausschalten.
-        pause(0.5); drawnow;
         ledsOff(false);
+        tPrevUpd = NaT;
+        updatePreviews();              % erstes Bild sofort anzeigen
+    end
+
+    function updatePreviews()
+        % Aktualisiert die App-Vorschaubilder der aktiven Kameras per
+        % getsnapshot (kein dauerhafter Stream). Fehler hier sind unkritisch.
+        try
+            if useL && ~isempty(hPrevL) && isvalid(hPrevL)
+                hPrevL.CData = getsnapshot(cams.left);
+            end
+        catch, end
+        try
+            if useR && ~isempty(hPrevR) && isvalid(hPrevR)
+                hPrevR.CData = getsnapshot(cams.right);
+            end
+        catch, end
+        tPrevUpd = datetime('now');
     end
 
     function ledsOff(verbose)
