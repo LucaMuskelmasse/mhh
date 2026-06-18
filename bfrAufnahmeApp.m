@@ -32,7 +32,6 @@ function bfrAufnahmeApp
 %% ================= Geteilter Zustand (nested-function Workspace) =================
 s        = [];          % serialport-Objekt (waehrend eines Laufs offen)
 cams     = [];          % struct mit Feldern .left / .right (videoinput)
-tMemLog  = NaT;         % Zeitpunkt der letzten Speicher-Logzeile
 tmr      = [];          % timer-Objekt fuer die Messschleife
 t0       = NaT;         % Startzeitpunkt des Laufs
 prevL    = -Inf;        % letzter Ausloesewert links
@@ -692,29 +691,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 prevR = vals(2);            % nur bei Ausloesung aktualisieren
             end
 
-            % --- Speicherverbrauch periodisch protokollieren (Diagnose) ---
-            logMemoryUsage(false);
-
             drawnow limitrate;
         catch ME
             logMsg("Fehler im Messzyklus: " + string(ME.message));
-        end
-    end
-
-    function logMemoryUsage(force)
-        % Schreibt ca. alle 30 s den von MATLAB belegten Speicher ins Log,
-        % damit ein etwaiges Anwachsen sichtbar wird (nur Windows: 'memory').
-        if nargin < 1, force = false; end
-        if ~force && ~isnat(tMemLog) && seconds(datetime('now') - tMemLog) < 30
-            return;
-        end
-        tMemLog = datetime('now');
-        try
-            m = memory;                                  % nur Windows
-            logMsg(sprintf("Speicher (MATLAB): %.0f MB belegt.", ...
-                           m.MemUsedMATLAB / 1e6));
-        catch
-            % 'memory' nicht verfuegbar (z.B. Nicht-Windows) -> still ignorieren
         end
     end
 
