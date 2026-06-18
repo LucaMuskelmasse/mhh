@@ -1005,8 +1005,8 @@ function cams = openDinoLiteCameras(dllPath, sides)
 %   wird zur Laufzeit dynamisch bestimmt (Dino-Lites werden per Geraetename
 %   gefunden, eine Webcam herausgefiltert und ueber die DNX64-Reihenfolge
 %   der Seite zugeordnet). Nur wenn das nicht klappt, gilt dieser feste Wert.
-    CONFIG(1).side = "LINKS";   CONFIG(1).winvideo = 2;  CONFIG(1).idaKey = ["6&189ed0a2&8&0000", "6&2b588147&5&0000"];
-    CONFIG(2).side = "RECHTS";  CONFIG(2).winvideo = 1;  CONFIG(2).idaKey = "6&d82dd4a&0&0000";
+    CONFIG(1).side = "LINKS";   CONFIG(1).winvideo = 1;  CONFIG(1).idaKey = "6&d82dd4a&0&0000";
+    CONFIG(2).side = "RECHTS";  CONFIG(2).winvideo = 2;  CONFIG(2).idaKey = ["6&189ed0a2&8&0000", "6&2b588147&5&0000"];
 % =======================================================================
 
     if nargin < 1 || strlength(string(dllPath)) == 0, dllPath = "DNX64.dll"; end
