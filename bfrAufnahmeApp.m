@@ -995,7 +995,12 @@ function cams = openDinoLiteCameras(dllPath, sides)
 %              clear cams; unloadlibrary('DNX64')
 %
 % ============================ KONFIGURATION ============================
-    CONFIG(1).side = "LINKS";   CONFIG(1).winvideo = 2;  CONFIG(1).idaKey = "6&189ed0a2&8&0000";
+%   idaKey darf je Seite EINE oder MEHRERE bekannte USB-Port-Kennungen
+%   enthalten. Hintergrund: Auf manchen Rechnern ist der Port-Pfad nicht
+%   stabil und wechselt auch ohne Umstecken. Es muss zur Laufzeit nur EINE
+%   der hinterlegten Kennungen vorhanden sein. Neue beobachtete Pfade
+%   einfach bei der passenden Seite ergaenzen.
+    CONFIG(1).side = "LINKS";   CONFIG(1).winvideo = 2;  CONFIG(1).idaKey = ["6&189ed0a2&8&0000", "6&2b588147&5&0000"];
     CONFIG(2).side = "RECHTS";  CONFIG(2).winvideo = 1;  CONFIG(2).idaKey = "6&d82dd4a&0&0000";
 % =======================================================================
 
@@ -1025,17 +1030,21 @@ function cams = openDinoLiteCameras(dllPath, sides)
     end
     fprintf("Angeschlossene Port-Kennungen: %s\n", strjoin(keys, ", "));
 
-    %% 3) Fail-safe: sind alle benoetigten Ports vorhanden? --------------
-    % Es muessen mindestens die Ports der angeforderten Seiten gefunden
-    % werden — sonst Abbruch, damit LINKS/RECHTS nicht vertauscht werden.
-    cfgKeys = [CONFIG.idaKey];
-    missing = setdiff(cfgKeys, keys);
-    if ~isempty(missing)
-        error(['Die angeschlossenen USB-Ports passen nicht zur Konfiguration ' ...
-               'der angeforderten Seite(n).\nBenoetigt: %s\nGefunden : %s\n' ...
-               'Vermutlich wurden die Ports geaendert. Bitte CONFIG neu ' ...
-               'kalibrieren - es wird abgebrochen, damit LINKS/RECHTS nicht ' ...
-               'vertauscht werden.'], strjoin(cfgKeys,", "), strjoin(keys,", "));
+    %% 3) Fail-safe: ist je angeforderter Seite mind. EIN bekannter Port da? --
+    % Der USB-Port-Pfad (idaKey) ist auf manchen Rechnern nicht stabil und kann
+    % sich auch ohne Umstecken aendern. Darum sind je Seite mehrere bekannte
+    % Pfade erlaubt; es muss nur EINER davon vorhanden sein. Fehlt fuer eine
+    % Seite jeder bekannte Port -> Abbruch (Schutz vor Verwechslung mit einer
+    % fremden Kamera).
+    for c = 1:numel(CONFIG)
+        if ~any(ismember(CONFIG(c).idaKey, keys))
+            error(['Fuer Seite %s ist kein bekannter USB-Port vorhanden.\n' ...
+                   'Erlaubt fuer %s: %s\nGefunden insgesamt: %s\n' ...
+                   'Vermutlich hat sich der Port-Pfad geaendert. Bitte den neuen ' ...
+                   'Pfad bei der passenden Seite in CONFIG ergaenzen (idaKey).'], ...
+                   CONFIG(c).side, CONFIG(c).side, ...
+                   strjoin(CONFIG(c).idaKey, ", "), strjoin(keys, ", "));
+        end
     end
 
     %% 4) Kameras oeffnen, Fenster beschriften + platzieren --------------
