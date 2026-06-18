@@ -1000,6 +1000,11 @@ function cams = openDinoLiteCameras(dllPath, sides)
 %   stabil und wechselt auch ohne Umstecken. Es muss zur Laufzeit nur EINE
 %   der hinterlegten Kennungen vorhanden sein. Neue beobachtete Pfade
 %   einfach bei der passenden Seite ergaenzen.
+%
+%   winvideo ist nur noch RUECKFALLEBENE: Der tatsaechliche winvideo-Index
+%   wird zur Laufzeit dynamisch bestimmt (Dino-Lites werden per Geraetename
+%   gefunden, eine Webcam herausgefiltert und ueber die DNX64-Reihenfolge
+%   der Seite zugeordnet). Nur wenn das nicht klappt, gilt dieser feste Wert.
     CONFIG(1).side = "LINKS";   CONFIG(1).winvideo = 2;  CONFIG(1).idaKey = ["6&189ed0a2&8&0000", "6&2b588147&5&0000"];
     CONFIG(2).side = "RECHTS";  CONFIG(2).winvideo = 1;  CONFIG(2).idaKey = "6&d82dd4a&0&0000";
 % =======================================================================
@@ -1053,6 +1058,32 @@ function cams = openDinoLiteCameras(dllPath, sides)
     % blockieren -> sonst zeigt die Vorschau nur ein rotes Kreuz ("Geraet belegt").
     try, imaqreset; pause(0.5); catch, end
 
+    % --- Dynamische winvideo-Zuordnung der Dino-Lites -------------------
+    % Der winvideo-Index ist nicht stabil: eine Webcam kann die Reihenfolge
+    % verschieben, sodass ein fester Index ploetzlich auf die Webcam zeigt.
+    % Daher die Dino-Lite-Geraete ueber den Geraetenamen herausfiltern (Webcam
+    % faellt weg) und in winvideo-Reihenfolge der DNX64-Reihenfolge zuordnen.
+    % Klappt das nicht (Geraetezahl passt nicht), wird der feste CONFIG-Index
+    % als Rueckfallebene genutzt.
+    dinoWinIDs = [];
+    try
+        info = imaqhwinfo('winvideo');
+        for k = 1:numel(info.DeviceInfo)
+            if contains(lower(string(info.DeviceInfo(k).DeviceName)), "dino")
+                dinoWinIDs(end+1) = info.DeviceInfo(k).DeviceID; %#ok<AGROW>
+            end
+        end
+        dinoWinIDs = sort(dinoWinIDs);
+    catch
+        dinoWinIDs = [];
+    end
+    useDynamicWin = numel(dinoWinIDs) == nDnx && nDnx >= 1;
+    if useDynamicWin
+        fprintf("Dino-Lite winvideo-IDs (sortiert): %s\n", mat2str(dinoWinIDs));
+    else
+        fprintf("Dynamische winvideo-Zuordnung nicht moeglich -> feste CONFIG-Indizes.\n");
+    end
+
     scr = get(0,'ScreenSize');
     wW  = scr(3)*0.46;  wH = wW*0.72;  yP = scr(4)*0.28;
     posBySide = struct('LINKS',  [scr(3)*0.02, yP, wW, wH], ...
@@ -1065,7 +1096,19 @@ function cams = openDinoLiteCameras(dllPath, sides)
     figs    = [];
     try
         for c = 1:numel(CONFIG)
-            vid = videoinput('winvideo', CONFIG(c).winvideo);
+            % winvideo-Index bestimmen: dynamisch ueber den zur Seite
+            % passenden DNX64-Port (didx = Position in keys = DNX64-Index+1),
+            % sonst der feste Wert aus CONFIG.
+            winId = CONFIG(c).winvideo;
+            if useDynamicWin
+                didx = find(ismember(keys, CONFIG(c).idaKey), 1);
+                if ~isempty(didx) && didx <= numel(dinoWinIDs)
+                    winId = dinoWinIDs(didx);
+                end
+            end
+            fprintf("%-6s -> winvideo-ID %d\n", CONFIG(c).side, winId);
+
+            vid = videoinput('winvideo', winId);
             opened = [opened vid]; %#ok<AGROW>
             vid.FramesPerTrigger = 1;
             triggerconfig(vid, 'manual');
@@ -1089,8 +1132,6 @@ function cams = openDinoLiteCameras(dllPath, sides)
             preview(vid, hIm);
 
             if CONFIG(c).side == "LINKS", cams.left = vid; else, cams.right = vid; end
-            fprintf("%-6s -> winvideo-ID %d (Port %s)\n", ...
-                    CONFIG(c).side, CONFIG(c).winvideo, CONFIG(c).idaKey);
         end
     catch ME
         % Aufraeumen, damit keine belegten Geraete zurueckbleiben
