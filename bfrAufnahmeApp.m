@@ -48,8 +48,8 @@ dirRrun   = "";
 csvLrun   = "";         % CSV-Tabelle links  (eine Zeile je gespeichertem Bild)
 csvRrun   = "";         % CSV-Tabelle rechts (eine Zeile je gespeichertem Bild)
 prefixRun = "";
-inlay1Run = "";         % Inlay-Kennnummer links  (fuer den Bildstempel)
-inlay2Run = "";         % Inlay-Kennnummer rechts (fuer den Bildstempel)
+id1Run    = "";         % voller Bezeichner Inlay 1 (MV<nr><Muster><Form>) fuer Stempel
+id2Run    = "";         % voller Bezeichner Inlay 2 (MV<nr><Muster><Form>) fuer Stempel
 useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
 stopTrun  = 70;         % Stopp-Temperatur Aufwaermen: Ende, wenn BEIDE Kanaele >= Wert
@@ -83,9 +83,9 @@ gLeft.Scrollable    = 'on';
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [17 3]);
+gP = uigridlayout(pnlParam, [19 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 17);
+gP.RowHeight   = repmat({'fit'}, 1, 19);
 
 uilabel(gP, 'Text','COM-Port:');
 edtCom = uieditfield(gP, 'text', 'Value','COM4');
@@ -105,7 +105,7 @@ lblIntHint = uilabel(gP, ...
 lblIntHint.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Stopp Aufw. [°C]:');
-edtStopT = uieditfield(gP, 'numeric', 'Value',70, ...
+edtStopT = uieditfield(gP, 'numeric', 'Value',90, ...
     'Tooltip',['Aufwaermvorgang: Lauf stoppt automatisch, wenn BEIDE ' ...
                'Kanaele >= diesem Wert sind.']);
 edtStopT.Layout.Column = [2 3];
@@ -176,33 +176,46 @@ lblInlay1 = uilabel(gP, 'Text','Inlay 1 (Kamera 1):');
 edtInlay1 = uieditfield(gP, 'text', 'Placeholder','xx-xx');
 edtInlay1.Layout.Column = [2 3];
 
+lblMuster1 = uilabel(gP, 'Text','Muster 1:');
+ddMuster1 = uidropdown(gP, ...
+    'Items',     {'(keins)','Funktionsmuster (-FM)','Labormuster (-LM)'}, ...
+    'ItemsData', {'','-FM','-LM'}, 'Value','', ...
+    'Tooltip',   'Mustertyp von Inlay 1 -> Suffix im Ordner-/Dateinamen.');
+ddMuster1.Layout.Column = [2 3];
+
+lblForm1 = uilabel(gP, 'Text','Form 1:');
+ddForm1 = uidropdown(gP, ...
+    'Items',     {'(keine)','Spiralform (-s)','Gerade Form (-g)'}, ...
+    'ItemsData', {'','-s','-g'}, 'Value','', ...
+    'Tooltip',   'Form von Inlay 1 -> Suffix im Ordner-/Dateinamen.');
+ddForm1.Layout.Column = [2 3];
+
 lblInlay2 = uilabel(gP, 'Text','Inlay 2 (Kamera 2):');
 edtInlay2 = uieditfield(gP, 'text', 'Placeholder','xx-xx');
 edtInlay2.Layout.Column = [2 3];
 
-% Inlay-Felder passend zur Kameraauswahl ein-/ausblenden (Initialzustand)
-syncInlayFields();
-
-uilabel(gP, 'Text','Muster:');
-ddMuster = uidropdown(gP, ...
+lblMuster2 = uilabel(gP, 'Text','Muster 2:');
+ddMuster2 = uidropdown(gP, ...
     'Items',     {'(keins)','Funktionsmuster (-FM)','Labormuster (-LM)'}, ...
-    'ItemsData', {'','-FM','-LM'}, ...
-    'Value',     '', ...
-    'Tooltip',   'Mustertyp -> Suffix im Versuchsordner-Namen.');
-ddMuster.Layout.Column = [2 3];
+    'ItemsData', {'','-FM','-LM'}, 'Value','', ...
+    'Tooltip',   'Mustertyp von Inlay 2 -> Suffix im Ordner-/Dateinamen.');
+ddMuster2.Layout.Column = [2 3];
 
-uilabel(gP, 'Text','Form:');
-ddForm = uidropdown(gP, ...
+lblForm2 = uilabel(gP, 'Text','Form 2:');
+ddForm2 = uidropdown(gP, ...
     'Items',     {'(keine)','Spiralform (-s)','Gerade Form (-g)'}, ...
-    'ItemsData', {'','-s','-g'}, ...
-    'Value',     '', ...
-    'Tooltip',   'Form -> Suffix im Versuchsordner-Namen.');
-ddForm.Layout.Column = [2 3];
+    'ItemsData', {'','-s','-g'}, 'Value','', ...
+    'Tooltip',   'Form von Inlay 2 -> Suffix im Ordner-/Dateinamen.');
+ddForm2.Layout.Column = [2 3];
+
+% Inlay-/Muster-/Form-Felder passend zur Kameraauswahl ein-/ausblenden
+syncInlayFields();
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
 lockables = [edtCom, edtInt, edtStopT, edtStopC, chkDb, edtIbStart, ...
              edtIbEnd, edtIbStep, edtObStep, ddCams, edtBase, edtDatum, ...
-             edtInlay1, edtInlay2, ddMuster, ddForm, btnBrowseBase];
+             edtInlay1, ddMuster1, ddForm1, edtInlay2, ddMuster2, ddForm2, ...
+             btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -377,9 +390,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             useL   = camSel ~= "rechts";
             useR   = camSel ~= "links";
 
-            % Inlay-Nummern fuer den Bildstempel einfrieren
-            inlay1Run = inlay1;
-            inlay2Run = inlay2;
+            % --- Muster-/Form-Auswahl JE Inlay lesen ("" | "-FM"/"-LM" und
+            %     "" | "-s"/"-g") ---
+            muster1 = string(ddMuster1.Value);  form1 = string(ddForm1.Value);
+            muster2 = string(ddMuster2.Value);  form2 = string(ddForm2.Value);
 
             assert(strlength(port)    > 0, "COM-Port darf nicht leer sein.");
             assert(intervall          > 0, "Intervall muss > 0 sein.");
@@ -404,19 +418,20 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 assert(strlength(inlay2) > 0, "Kennnummer Inlay 2 (Kamera 2) darf nicht leer sein.");
             end
 
-            % --- Muster-/Form-Suffix aus den Dropdowns ("" | "-FM"/"-LM" |
-            %     "" | "-s"/"-g") ---
-            muster = string(ddMuster.Value);
-            form   = string(ddForm.Value);
+            % --- Voller Bezeichner JE Inlay: MV<Nr><Muster><Form> ---
+            % (Muster/Form sind pro Inlay einzeln waehlbar, Suffixe tragen den
+            %  fuehrenden Bindestrich, z.B. "-FM", "-s".)
+            id1 = "MV" + inlay1 + muster1 + form1;     % z.B. MV11-11-FM-s
+            id2 = "MV" + inlay2 + muster2 + form2;
+            id1Run = id1;  id2Run = id2;               % fuer den Bildstempel einfrieren
 
-            % --- Versuchsordner nach festem Namensschema zusammensetzen ---
-            % beide : <Datum>-MV<Inlay1>-MV<Inlay2>[-FM|-LM][-s|-g]
-            % links : <Datum>-MV<Inlay1>[-FM|-LM][-s|-g]
-            % rechts: <Datum>-MV<Inlay2>[-FM|-LM][-s|-g]
+            % --- Versuchsordner nach Namensschema zusammensetzen ---
+            % beide : <Datum>-<Inlay1-Bez>-<Inlay2-Bez>
+            % links : <Datum>-<Inlay1-Bez>     rechts: <Datum>-<Inlay2-Bez>
+            % wobei <InlayX-Bez> = MV<Nr>[-FM|-LM][-s|-g]
             name = datum;
-            if useL, name = name + "-MV" + inlay1; end
-            if useR, name = name + "-MV" + inlay2; end
-            name = name + muster + form;
+            if useL, name = name + "-" + id1; end
+            if useR, name = name + "-" + id2; end
             ordner = string(fullfile(baseDir, name));
 
             % --- Bestaetigung wie im alten Skript ---
@@ -449,11 +464,13 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             % Einheit als "Grad C" statt °C, damit die Datei encoding-unabhaengig
             % sauber bleibt.
             n1 = @(x) strrep(sprintf('%.1f', x), '.', ',');
-            inl1Str = "(nicht verwendet)";  if useL, inl1Str = "MV" + inlay1; end
-            inl2Str = "(nicht verwendet)";  if useR, inl2Str = "MV" + inlay2; end
-            % Lesbaren Auswahltext der Dropdowns fuer den CSV-Kopf holen
-            musterText = string(ddMuster.Items{strcmp(string(ddMuster.ItemsData), muster)});
-            formText   = string(ddForm.Items{strcmp(string(ddForm.ItemsData), form)});
+            inl1Str = "(nicht verwendet)";  if useL, inl1Str = id1; end
+            inl2Str = "(nicht verwendet)";  if useR, inl2Str = id2; end
+            % Lesbaren Auswahltext der Muster-/Form-Dropdowns je Inlay holen
+            mTxt1 = string(ddMuster1.Items{strcmp(string(ddMuster1.ItemsData), muster1)});
+            fTxt1 = string(ddForm1.Items{strcmp(string(ddForm1.ItemsData), form1)});
+            mTxt2 = string(ddMuster2.Items{strcmp(string(ddMuster2.ItemsData), muster2)});
+            fTxt2 = string(ddForm2.Items{strcmp(string(ddForm2.ItemsData), form2)});
             paramLines = [ ...
                 "Parameter;Wert"; ...
                 "COM-Port;"            + port; ...
@@ -467,25 +484,28 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 "OB-Schritt [Grad C];" + n1(obStepRun); ...
                 "Kameras;"             + camLabel(); ...
                 "Datum;"               + datum; ...
-                "Inlay 1 (Kamera 1);" + inl1Str; ...
-                "Inlay 2 (Kamera 2);" + inl2Str; ...
-                "Muster;"              + musterText; ...
-                "Form;"                + formText; ...
+                "Inlay 1 (Kamera 1);"  + inl1Str; ...
+                "Muster (Kamera 1);"   + mTxt1; ...
+                "Form (Kamera 1);"     + fTxt1; ...
+                "Inlay 2 (Kamera 2);"  + inl2Str; ...
+                "Muster (Kamera 2);"   + mTxt2; ...
+                "Form (Kamera 2);"     + fTxt2; ...
                 "Basisordner;"         + baseDir; ...
                 "Versuchsordner;"      + ordner; ...
                 "Datums-Praefix;"      + prefixRun ];
 
-            dirLrun = string(fullfile(ordner, "MV" + inlay1));
-            dirRrun = string(fullfile(ordner, "MV" + inlay2));
+            % Unterordner + CSV tragen den vollen Inlay-Bezeichner (MV<Nr><Muster><Form>)
+            dirLrun = string(fullfile(ordner, id1));
+            dirRrun = string(fullfile(ordner, id2));
             csvLrun = "";  csvRrun = "";
             if useL
                 if ~exist(dirLrun, 'dir'), mkdir(dirLrun); end
-                csvLrun = string(fullfile(dirLrun, prefixRun + "-MV" + inlay1 + ".csv"));
+                csvLrun = string(fullfile(dirLrun, prefixRun + "-" + id1 + ".csv"));
                 initCsv(csvLrun, paramLines);
             end
             if useR
                 if ~exist(dirRrun, 'dir'), mkdir(dirRrun); end
-                csvRrun = string(fullfile(dirRrun, prefixRun + "-MV" + inlay2 + ".csv"));
+                csvRrun = string(fullfile(dirRrun, prefixRun + "-" + id2 + ".csv"));
                 initCsv(csvRrun, paramLines);
             end
 
@@ -675,7 +695,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 
             if useL && trigL
                 captureSingleFrameSide(cams.left, dirLrun, prefixRun, vals(1), "1", ...
-                                       "MV" + inlay1Run, csvLrun);
+                                       id1Run, csvLrun);
                 cntL = cntL + 1;
                 lblCntL.Text = num2str(cntL);
                 logMsg(sprintf("Aufnahme Kamera 1 (links)  bei %.1f %s (Bild %d).", vals(1), uL, cntL));
@@ -684,7 +704,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 
             if useR && trigR
                 captureSingleFrameSide(cams.right, dirRrun, prefixRun, vals(2), "2", ...
-                                       "MV" + inlay2Run, csvRrun);
+                                       id2Run, csvRrun);
                 cntR = cntR + 1;
                 lblCntR.Text = num2str(cntR);
                 logMsg(sprintf("Aufnahme Kamera 2 (rechts) bei %.1f %s (Bild %d).", vals(2), uR, cntR));
@@ -729,13 +749,18 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 %% ============================== Hilfsfunktionen ==================================
 
     function syncInlayFields()
-        % Blendet die Inlay-Eingabefelder passend zur Kameraauswahl ein/aus.
-        % Nur links  -> nur Inlay 1; nur rechts -> nur Inlay 2; beide -> beide.
+        % Blendet Inlay-, Muster- und Form-Felder passend zur Kameraauswahl
+        % ein/aus. Nur links -> nur Inlay 1 (+Muster/Form 1); nur rechts ->
+        % nur Inlay 2 (+Muster/Form 2); beide -> alle.
         camSel = string(ddCams.Value);     % "beide" | "links" | "rechts"
         wantL  = camSel ~= "rechts";
         wantR  = camSel ~= "links";
-        setInlay(lblInlay1, edtInlay1, wantL);
-        setInlay(lblInlay2, edtInlay2, wantR);
+        setInlay(lblInlay1,  edtInlay1, wantL);
+        setInlay(lblMuster1, ddMuster1, wantL);
+        setInlay(lblForm1,   ddForm1,   wantL);
+        setInlay(lblInlay2,  edtInlay2, wantR);
+        setInlay(lblMuster2, ddMuster2, wantR);
+        setInlay(lblForm2,   ddForm2,   wantR);
     end
 
     function initCsv(p, paramLines)
