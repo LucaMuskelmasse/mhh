@@ -34,7 +34,6 @@ s        = [];          % serialport-Objekt (waehrend eines Laufs offen)
 cams     = [];          % struct mit Feldern .left / .right (videoinput)
 tmr      = [];          % timer-Objekt fuer die Messschleife
 t0       = NaT;         % Startzeitpunkt des Laufs
-tPrevRst = NaT;         % Zeitpunkt des letzten Vorschau-Neustarts (Speicher-Flush)
 prevL    = -Inf;        % letzter Ausloesewert links
 prevR    = -Inf;        % letzter Ausloesewert rechts
 cntL     = 0;           % Bildzaehler links
@@ -636,8 +635,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             % --- Laufzustand initialisieren ---
-            t0       = datetime('now');
-            tPrevRst = datetime('now');   % erster Vorschau-Neustart in 5 min
+            t0    = datetime('now');
             prevL = -Inf;  prevR = -Inf;
             cntL  = 0;     cntR  = 0;
             if useL, lblCntL.Text = '0'; else, lblCntL.Text = '— (inaktiv)'; end
@@ -793,15 +791,6 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 prevR = vals(2);            % nur bei Ausloesung aktualisieren
             end
 
-            % --- Vorschau alle 5 min neu starten -> GUI-Renderer-Speicher
-            %     freigeben (matlabwindowhelper.exe), damit der RAM bei langen
-            %     Laeufen nicht volllaeuft. ---
-            if ~isnat(tPrevRst) && seconds(datetime('now') - tPrevRst) >= 300
-                tPrevRst = datetime('now');
-                startCameraPreviews();
-                logMsg("Vorschau neu gestartet (Grafikspeicher freigegeben).");
-            end
-
             drawnow limitrate;
         catch ME
             logMsg("Fehler im Messzyklus: " + string(ME.message));
@@ -917,42 +906,26 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function attachPreviews()
-        % Schliesst die externen Fenster aus openDinoLiteCameras und startet
-        % die Live-Vorschau in den App-Achsen.
-        delete(findall(0, 'Type','figure', 'Tag','bfrPreview'));
-        startCameraPreviews();
+        % Live-Vorschau: Die von openDinoLiteCameras erzeugten KLASSISCHEN
+        % Fenster (Tag 'bfrPreview') bleiben waehrend des gesamten Laufs offen
+        % und dienen als Live-Ansicht. Sie nutzen den klassischen Renderer und
+        % NICHT den uifigure-Renderer (matlabwindowhelper.exe), der bei Video
+        % Speicher anhaeuft, ohne ihn je freizugeben -> dadurch laeuft der RAM
+        % auch bei langen Laeufen nicht mehr voll. In den App-Achsen steht nur
+        % ein Hinweis; dorthin gelangt KEIN Video.
+        if useL, showExternalNote(axCamL); else, showInactive(axCamL); end
+        if useR, showExternalNote(axCamR); else, showInactive(axCamR); end
+        drawnow;
+        ledsOff(false);
     end
 
-    function startCameraPreviews()
-        % (Neu-)Startet die Live-Vorschau der aktiven Kameras in den App-Achsen.
-        %
-        % WICHTIG (Speicher): Der GUI-Renderer (matlabwindowhelper.exe) gibt den
-        % fuer die Vorschau angesammelten Texturspeicher NICHT von selbst frei.
-        % Durch das Neu-Erzeugen der Bild-Objekte (cla in makePreviewImage) beim
-        % periodischen Neustart (siehe onTick, alle 5 min) wird dieser Speicher
-        % freigegeben -> der RAM laeuft nicht mehr voll, egal wie lange der Lauf
-        % dauert. Deshalb kann die Anzeige hier mit hoeherer Bildrate laufen.
-        stoppreview(activeCams());
-        drawnow;                       % Renderer das Stoppen/Freigeben verarbeiten lassen
-        if useL
-            hImL = makePreviewImage(axCamL, cams.left);
-            setappdata(hImL, 'UpdatePreviewWindowFcn', @throttledPreviewUpdate);
-            preview(cams.left, hImL);
-        else
-            showInactive(axCamL);
-        end
-        if useR
-            hImR = makePreviewImage(axCamR, cams.right);
-            setappdata(hImR, 'UpdatePreviewWindowFcn', @throttledPreviewUpdate);
-            preview(cams.right, hImR);
-        else
-            showInactive(axCamR);
-        end
-
-        % Der (Neu-)Start der Vorschau schaltet die Dino-Lite-LEDs wieder ein
-        % -> nach kurzem Anlaufen erneut ausschalten.
-        pause(0.5); drawnow;
-        ledsOff(false);
+    function showExternalNote(ax)
+        % Hinweis in der App-Achse: Live-Bild laeuft im separaten Fenster.
+        cla(ax);
+        ax.XLim = [0 1]; ax.YLim = [0 1];
+        text(ax, 0.5, 0.5, {'Live-Vorschau','im separaten Fenster'}, ...
+             'HorizontalAlignment','center', 'FontSize',14, 'Color',[0.70 0.70 0.78]);
+        ax.XTick = []; ax.YTick = [];
     end
 
     function ledsOff(verbose)
@@ -1016,6 +989,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         catch, end
         cams = [];
 
+        % Externe Live-Vorschaufenster schliessen
+        try, delete(findall(0, 'Type','figure', 'Tag','bfrPreview')); catch, end
+
         try
             if libisloaded('DNX64'), unloadlibrary('DNX64'); end
         catch, end
@@ -1046,25 +1022,6 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
 end % ================================ Ende App =====================================
-
-
-function throttledPreviewUpdate(~, event, himage)
-% THROTTLEDPREVIEWUPDATE  Leicht gedrosselte Vorschau-Aktualisierung fuer
-% preview(). Die Kamera streamt mit voller Rate weiter (Auto-Belichtung bleibt
-% korrekt), das angezeigte Bild wird nur jedes 2. Frame aktualisiert (~15 fps
-% statt ~30). Den unbegrenzten Speicheraufbau im GUI-Renderer faengt jetzt der
-% periodische Vorschau-Neustart ab (siehe startCameraPreviews / onTick), daher
-% kann hier eine hoehere Bildrate laufen.
-    try
-        c = getappdata(himage, 'frameSkip');
-        if isempty(c) || c <= 0
-            himage.CData = event.Data;       % dieses Frame anzeigen
-            c = 2;                           % danach 1 Frame ueberspringen (~15 fps)
-        end
-        setappdata(himage, 'frameSkip', c - 1);
-    catch
-    end
-end
 
 
 %% ###############################################################################
