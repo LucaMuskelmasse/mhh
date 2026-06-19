@@ -83,13 +83,29 @@ gLeft.Scrollable    = 'on';
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [19 3]);
+gP = uigridlayout(pnlParam, [20 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 19);
+gP.RowHeight   = repmat({'fit'}, 1, 20);
 
 uilabel(gP, 'Text','COM-Port:');
-edtCom = uieditfield(gP, 'text', 'Value','COM4');
-edtCom.Layout.Column = [2 3];
+% Zuletzt benutzten Port (falls gemerkt) als Vorauswahl laden
+defPort = 'COM4';
+try, defPort = char(getpref('bfrAufnahmeApp','comPort','COM4')); catch, end
+portItems = cellstr(serialportlist);
+if isempty(portItems), portItems = {defPort}; end
+if ~any(strcmp(portItems, defPort)), portItems{end+1} = defPort; end
+ddCom = uidropdown(gP, 'Editable','on', 'Items',portItems, 'Value',defPort, ...
+    'Tooltip',['Seriellen Port des Omega HH806AWE waehlen. Eintippen moeglich, ' ...
+               '⟳ aktualisiert die Liste, ''Messgeraet suchen'' findet ihn automatisch.']);
+ddCom.Layout.Column = 2;
+btnPorts = uibutton(gP, 'Text','⟳', 'Tooltip','Portliste aktualisieren', ...
+    'ButtonPushedFcn', @(~,~) refreshPorts());
+
+btnFindThermo = uibutton(gP, 'Text','Messgerät suchen', ...
+    'Tooltip',['Probiert alle seriellen Ports durch und waehlt den Port, an dem ' ...
+               'das Omega-Thermometer antwortet, automatisch aus.'], ...
+    'ButtonPushedFcn', @(~,~) findThermo());
+btnFindThermo.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Intervall [s]:');
 edtInt = uieditfield(gP, 'numeric', 'Value',0.4, ...
@@ -212,10 +228,10 @@ ddForm2.Layout.Column = [2 3];
 syncInlayFields();
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
-lockables = [edtCom, edtInt, edtStopT, edtStopC, chkDb, edtIbStart, ...
-             edtIbEnd, edtIbStep, edtObStep, ddCams, edtBase, edtDatum, ...
-             edtInlay1, ddMuster1, ddForm1, edtInlay2, ddMuster2, ddForm2, ...
-             btnBrowseBase];
+lockables = [ddCom, btnPorts, btnFindThermo, edtInt, edtStopT, edtStopC, ...
+             chkDb, edtIbStart, edtIbEnd, edtIbStep, edtObStep, ddCams, ...
+             edtBase, edtDatum, edtInlay1, ddMuster1, ddForm1, edtInlay2, ...
+             ddMuster2, ddForm2, btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -366,12 +382,74 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         end
     end
 
+    % ------------------------------------------------------ COM-Port-Helfer ---
+    function refreshPorts()
+        % Aktualisiert die Liste der seriellen Ports; aktuelle Auswahl bleibt
+        % erhalten (auch wenn der Port gerade nicht gelistet ist).
+        cur = "";  try, cur = string(ddCom.Value); catch, end
+        items = cellstr(serialportlist);
+        if isempty(items), items = {char(cur)}; end
+        if strlength(cur) > 0 && ~any(strcmp(items, char(cur)))
+            items{end+1} = char(cur);
+        end
+        ddCom.Items = items;
+        if strlength(cur) > 0, ddCom.Value = char(cur); end
+        logMsg("Portliste aktualisiert: " + strjoin(string(items), ", "));
+    end
+
+    function findThermo()
+        % Probiert jeden verfuegbaren seriellen Port: oeffnet ihn mit den
+        % Omega-Einstellungen, schickt den Abfragebefehl und prueft, ob eine
+        % gueltige Temperaturantwort kommt. Der antwortende Port IST das
+        % Thermometer (unabhaengig von Laptop/COM-Nummer/Kabel).
+        if running, return; end
+        ports = serialportlist;
+        if isempty(ports)
+            logMsg("Keine seriellen Ports gefunden — Kabel/Treiber pruefen.");
+            return;
+        end
+        logMsg(sprintf("Suche Messgeraet an %d Port(s) …", numel(ports)));
+        btnFindThermo.Enable = 'off';  btnFindThermo.Text = 'suche …';  drawnow;
+        found = "";
+        for p = ports
+            try
+                if exist('serialportfind','file')      % ab R2024a: Altlasten loesen
+                    delete(serialportfind('Port', p));
+                end
+            catch, end
+            try
+                sp = serialport(p, 19200, "Parity","even", "DataBits",8, "StopBits",1);
+                sp.Timeout = 1;
+                [vals, ~, ok] = getHH806Temp(sp);       % nutzt das offene Objekt
+                clear sp;
+                % gueltige Omega-Antwort: dekodierbar, 2 Kanaele, plausible Werte
+                good = ok && numel(vals) >= 2;
+                if good
+                    v = vals(~isnan(vals));
+                    good = ~isempty(v) && all(v > -100 & v < 500);
+                end
+                if good, found = string(p); break; end
+            catch
+                % Port nicht oeffenbar oder kein passendes Geraet -> weiter
+            end
+        end
+        btnFindThermo.Text = 'Messgerät suchen';
+        btnFindThermo.Enable = 'on';
+        refreshPorts();
+        if strlength(found) > 0
+            ddCom.Value = char(found);
+            logMsg("Messgeraet gefunden und ausgewaehlt: " + found + ".");
+        else
+            logMsg("Kein Messgeraet gefunden. Bitte Port aus der Liste manuell waehlen.");
+        end
+    end
+
     % ------------------------------------------------------------------ Start ---
     function onStart(~,~)
         if running, return; end
         try
             % --- Parameter aus den Feldern lesen und validieren ---
-            port      = strtrim(string(edtCom.Value));
+            port      = strtrim(string(ddCom.Value));
             intervall = edtInt.Value;
             stopTrun  = edtStopT.Value;
             stopCrun  = edtStopC.Value;
@@ -525,6 +603,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             logMsg("Oeffne " + port + " …");
             s = serialport(port, 19200, "Parity","even", "DataBits",8, "StopBits",1);
             s.Timeout = 1;
+            % Funktionierenden Port fuer das naechste Mal merken (Vorauswahl)
+            try, setpref('bfrAufnahmeApp','comPort', char(port)); catch, end
 
             % --- Nur die gewaehlten Kameras oeffnen (feste Zuordnung, LEDs aus) ---
             sides = strings(1,0);
