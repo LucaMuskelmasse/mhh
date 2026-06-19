@@ -34,6 +34,7 @@ s        = [];          % serialport-Objekt (waehrend eines Laufs offen)
 cams     = [];          % struct mit Feldern .left / .right (videoinput)
 tmr      = [];          % timer-Objekt fuer die Messschleife
 t0       = NaT;         % Startzeitpunkt des Laufs
+tPrevRst = NaT;         % Zeitpunkt des letzten Vorschau-Neustarts (Speicher-Flush)
 prevL    = -Inf;        % letzter Ausloesewert links
 prevR    = -Inf;        % letzter Ausloesewert rechts
 cntL     = 0;           % Bildzaehler links
@@ -635,7 +636,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             % --- Laufzustand initialisieren ---
-            t0    = datetime('now');
+            t0       = datetime('now');
+            tPrevRst = datetime('now');   % erster Vorschau-Neustart in 5 min
             prevL = -Inf;  prevR = -Inf;
             cntL  = 0;     cntR  = 0;
             if useL, lblCntL.Text = '0'; else, lblCntL.Text = '— (inaktiv)'; end
@@ -791,6 +793,15 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 prevR = vals(2);            % nur bei Ausloesung aktualisieren
             end
 
+            % --- Vorschau alle 5 min neu starten -> GUI-Renderer-Speicher
+            %     freigeben (matlabwindowhelper.exe), damit der RAM bei langen
+            %     Laeufen nicht volllaeuft. ---
+            if ~isnat(tPrevRst) && seconds(datetime('now') - tPrevRst) >= 300
+                tPrevRst = datetime('now');
+                startCameraPreviews();
+                logMsg("Vorschau neu gestartet (Grafikspeicher freigegeben).");
+            end
+
             drawnow limitrate;
         catch ME
             logMsg("Fehler im Messzyklus: " + string(ME.message));
@@ -906,17 +917,23 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function attachPreviews()
-        % Leitet die Live-Vorschau der aktiven Kameras in die App-Achsen um,
-        % schliesst die externen Fenster aus openDinoLiteCameras und markiert
-        % die Achsen inaktiver Seiten.
-        %
-        % WICHTIG (Speicher): Die Kamera streamt mit voller Rate weiter (damit
-        % die Auto-Belichtung korrekt bleibt), aber das ANGEZEIGTE Bild wird
-        % per gedrosseltem UpdatePreviewWindowFcn nur ~2-3x/s aktualisiert.
-        % Bei voller Rate stapeln sich die Frames sonst im GUI-Renderer
-        % (matlabwindowhelper.exe) und der RAM laeuft voll -> Absturz.
-        stoppreview(activeCams());
+        % Schliesst die externen Fenster aus openDinoLiteCameras und startet
+        % die Live-Vorschau in den App-Achsen.
         delete(findall(0, 'Type','figure', 'Tag','bfrPreview'));
+        startCameraPreviews();
+    end
+
+    function startCameraPreviews()
+        % (Neu-)Startet die Live-Vorschau der aktiven Kameras in den App-Achsen.
+        %
+        % WICHTIG (Speicher): Der GUI-Renderer (matlabwindowhelper.exe) gibt den
+        % fuer die Vorschau angesammelten Texturspeicher NICHT von selbst frei.
+        % Durch das Neu-Erzeugen der Bild-Objekte (cla in makePreviewImage) beim
+        % periodischen Neustart (siehe onTick, alle 5 min) wird dieser Speicher
+        % freigegeben -> der RAM laeuft nicht mehr voll, egal wie lange der Lauf
+        % dauert. Deshalb kann die Anzeige hier mit hoeherer Bildrate laufen.
+        stoppreview(activeCams());
+        drawnow;                       % Renderer das Stoppen/Freigeben verarbeiten lassen
         if useL
             hImL = makePreviewImage(axCamL, cams.left);
             setappdata(hImL, 'UpdatePreviewWindowFcn', @throttledPreviewUpdate);
@@ -932,7 +949,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             showInactive(axCamR);
         end
 
-        % Der Neustart der Vorschau schaltet die Dino-Lite-LEDs wieder ein
+        % Der (Neu-)Start der Vorschau schaltet die Dino-Lite-LEDs wieder ein
         % -> nach kurzem Anlaufen erneut ausschalten.
         pause(0.5); drawnow;
         ledsOff(false);
@@ -1032,16 +1049,17 @@ end % ================================ Ende App ================================
 
 
 function throttledPreviewUpdate(~, event, himage)
-% THROTTLEDPREVIEWUPDATE  Gedrosselte Vorschau-Aktualisierung fuer preview().
-% Die Kamera streamt mit voller Rate weiter (Auto-Belichtung bleibt korrekt),
-% aber das angezeigte Bild wird nur jedes N-te Frame aktualisiert. So gelangen
-% pro Sekunde nur ~2-3 statt ~30 Frames in den GUI-Renderer
-% (matlabwindowhelper.exe) -> dessen Speicheraufbau wird drastisch gebremst.
+% THROTTLEDPREVIEWUPDATE  Leicht gedrosselte Vorschau-Aktualisierung fuer
+% preview(). Die Kamera streamt mit voller Rate weiter (Auto-Belichtung bleibt
+% korrekt), das angezeigte Bild wird nur jedes 2. Frame aktualisiert (~15 fps
+% statt ~30). Den unbegrenzten Speicheraufbau im GUI-Renderer faengt jetzt der
+% periodische Vorschau-Neustart ab (siehe startCameraPreviews / onTick), daher
+% kann hier eine hoehere Bildrate laufen.
     try
         c = getappdata(himage, 'frameSkip');
         if isempty(c) || c <= 0
             himage.CData = event.Data;       % dieses Frame anzeigen
-            c = 12;                          % danach 11 Frames ueberspringen
+            c = 2;                           % danach 1 Frame ueberspringen (~15 fps)
         end
         setappdata(himage, 'frameSkip', c - 1);
     catch
