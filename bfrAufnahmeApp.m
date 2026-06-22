@@ -906,26 +906,36 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function attachPreviews()
-        % Live-Vorschau: Die von openDinoLiteCameras erzeugten KLASSISCHEN
-        % Fenster (Tag 'bfrPreview') bleiben waehrend des gesamten Laufs offen
-        % und dienen als Live-Ansicht. Sie nutzen den klassischen Renderer und
-        % NICHT den uifigure-Renderer (matlabwindowhelper.exe), der bei Video
-        % Speicher anhaeuft, ohne ihn je freizugeben -> dadurch laeuft der RAM
-        % auch bei langen Laeufen nicht mehr voll. In den App-Achsen steht nur
-        % ein Hinweis; dorthin gelangt KEIN Video.
-        if useL, showExternalNote(axCamL); else, showInactive(axCamL); end
-        if useR, showExternalNote(axCamR); else, showInactive(axCamR); end
-        drawnow;
-        ledsOff(false);
-    end
+        % Schliesst die externen Fokus-Fenster und startet die Live-Vorschau
+        % in den App-Achsen, STARK gedrosselt (siehe throttledPreviewUpdate).
+        %
+        % WICHTIG (Speicher): preview() haeuft pro angezeigtem Frame Speicher an
+        % und gibt ihn nicht frei — unabhaengig davon, ob das Bild in einer
+        % uifigure (matlabwindowhelper.exe) oder einem klassischen Fenster
+        % (MATLAB.exe) liegt. Das Leck laesst sich nicht beseitigen, nur
+        % verlangsamen: Bei ~1 angezeigtem Bild/s ist die Rate ca. 30x kleiner
+        % als bei voller Bildrate -> selbst nach Stunden unkritisch.
+        delete(findall(0, 'Type','figure', 'Tag','bfrPreview'));
+        stoppreview(activeCams());
+        if useL
+            hImL = makePreviewImage(axCamL, cams.left);
+            setappdata(hImL, 'UpdatePreviewWindowFcn', @throttledPreviewUpdate);
+            preview(cams.left, hImL);
+        else
+            showInactive(axCamL);
+        end
+        if useR
+            hImR = makePreviewImage(axCamR, cams.right);
+            setappdata(hImR, 'UpdatePreviewWindowFcn', @throttledPreviewUpdate);
+            preview(cams.right, hImR);
+        else
+            showInactive(axCamR);
+        end
 
-    function showExternalNote(ax)
-        % Hinweis in der App-Achse: Live-Bild laeuft im separaten Fenster.
-        cla(ax);
-        ax.XLim = [0 1]; ax.YLim = [0 1];
-        text(ax, 0.5, 0.5, {'Live-Vorschau','im separaten Fenster'}, ...
-             'HorizontalAlignment','center', 'FontSize',14, 'Color',[0.70 0.70 0.78]);
-        ax.XTick = []; ax.YTick = [];
+        % Der Start der Vorschau schaltet die Dino-Lite-LEDs wieder ein
+        % -> nach kurzem Anlaufen erneut ausschalten.
+        pause(0.5); drawnow;
+        ledsOff(false);
     end
 
     function ledsOff(verbose)
@@ -1022,6 +1032,27 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
 end % ================================ Ende App =====================================
+
+
+function throttledPreviewUpdate(~, event, himage)
+% THROTTLEDPREVIEWUPDATE  Zeitbasiert gedrosselte Vorschau-Aktualisierung fuer
+% preview(): Die Kamera streamt mit voller Rate weiter (Auto-Belichtung bleibt
+% korrekt), aber das ANGEZEIGTE Bild wird hoechstens 1x pro Sekunde erneuert.
+% Da preview() pro angezeigtem Frame Speicher anhaeuft (nicht beseitigbares
+% MATLAB-Leck), haelt die niedrige Anzeigerate den Speicheraufbau klein genug,
+% dass der RAM auch nach Stunden nicht volllaeuft.
+    persistent INTERVALL_S
+    if isempty(INTERVALL_S), INTERVALL_S = 1.0; end   % max. 1 Bild/s anzeigen
+    try
+        last = getappdata(himage, 'tLastDraw');       % serielle Tageszahl (now)
+        tnow = now;
+        if isempty(last) || (tnow - last) * 86400 >= INTERVALL_S
+            himage.CData = event.Data;
+            setappdata(himage, 'tLastDraw', tnow);
+        end
+    catch
+    end
+end
 
 
 %% ###############################################################################
