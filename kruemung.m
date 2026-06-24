@@ -167,32 +167,57 @@ xlabel('Temperatur [°C]');
 ylabel('Mittlere Krümmung');
 title('Mittlere Krümmung abhängig von Temperatur');
 
-%% 5. Farbliche Krümmungsdarstellung über dem Originalbild
-figure;
+%% 5. Farbliche Krümmungsdarstellung über dem Originalbild (mit Slider)
 cmap = jet(256);
 allKappa = [ImageData.kappa];
 kMin = min(allKappa);            % min/max ignorieren NaN automatisch
 kMax = max(allKappa);
 
-for n = 1:ImageNummax
-    imshow(ImageData(n).gray); hold on;
+hFig = figure('Name', 'Krümmungsdarstellung', 'NumberTitle', 'off');
+hAx  = axes('Parent', hFig, 'Position', [0.05 0.15 0.9 0.80]);
+
+% Slider zum Vor- und Zurückspulen durch die Frames
+if ImageNummax > 1
+    smallStep = 1/(ImageNummax-1);
+    sliderStep = [smallStep, max(smallStep, 10/(ImageNummax-1))];
+else
+    sliderStep = [1 1];
+end
+hSlider = uicontrol('Parent', hFig, 'Style', 'slider', ...
+    'Units', 'normalized', 'Position', [0.15 0.03 0.7 0.05], ...
+    'Min', 1, 'Max', max(ImageNummax,2), 'Value', 1, ...
+    'SliderStep', sliderStep);
+
+% Live-Aktualisierung beim Ziehen des Sliders
+addlistener(hSlider, 'Value', 'PostSet', ...
+    @(src, evt) drawFrame(hAx, ImageData, round(hSlider.Value), cmap, kMin, kMax));
+
+% Erstes Bild anzeigen
+drawFrame(hAx, ImageData, 1, cmap, kMin, kMax);
+
+
+%% Lokale Funktion: ein Frame mit farbiger Krümmung zeichnen
+function drawFrame(hAx, ImageData, n, cmap, kMin, kMax)
+    n = min(max(round(n), 1), numel(ImageData));
+
+    imshow(ImageData(n).gray, 'Parent', hAx);
+    hold(hAx, 'on');
 
     kValues = ImageData(n).kappa;
+    xs = ImageData(n).xs;
+    ys = ImageData(n).ys;
 
-    for i = 1:length(ImageData(n).xs)-1
-
+    for i = 1:length(xs)-1
         normVal = (kValues(i) - kMin) / (kMax - kMin);
         normVal = min(max(normVal, 0), 1);
 
         colorIdx = max(1, round(normVal * 255) + 1);
         lineColor = cmap(colorIdx,:);
 
-        plot(ImageData(n).xs(i:i+1), ImageData(n).ys(i:i+1), ...
+        plot(hAx, xs(i:i+1), ys(i:i+1), ...
             '-', 'LineWidth', 3, 'Color', lineColor);
     end
 
-    title(sprintf('Skelett über Originalbild (Frame %d)', n));
-    drawnow;
-    hold off;
-    pause(0.1);
+    title(hAx, sprintf('Skelett über Originalbild (Frame %d / %d)', n, numel(ImageData)));
+    hold(hAx, 'off');
 end
