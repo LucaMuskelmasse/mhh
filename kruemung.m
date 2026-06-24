@@ -44,7 +44,7 @@ for n = 1:ImageNummax
     grayImgFiltered = medfilt2(grayImg, [3 3]);
 
     % --- Binarisierung ---
-    level = 0.54;
+    level = 0.58;
     bwImg = imbinarize(grayImgFiltered, level);
 
     % ROI: außerhalb des interessanten Bereichs auf weiß setzen
@@ -56,8 +56,8 @@ for n = 1:ImageNummax
 
     [H, W] = size(bwImg);
 
-    xv = [0.5108 0.5138 1.0028 1.0763 1.1108 1.1138 1.0103 0.7193 0.7208]*1000;
-    yv = [0.0012 0.9357 0.9147 0.6432 0.3612 0.2082 0.0717 0.0732 0.0005]*1000;
+    xv = [0.3563 0.4332 0.9173 1.1393 1.1933 1.1768 0.9188 0.6053 0.5183]*1000;
+    yv = [0.0005 0.9313 0.9253 0.7618 0.4918 0.2037 0.0822 0.0792 0.0005]*1000;
 
 
     mask = poly2mask(xv, yv, H, W);
@@ -75,7 +75,7 @@ for n = 1:ImageNummax
     wireFG = bwareaopen(wireFG, 300);     % kleine Specks entfernen
 
     % Lücken schließen (Radius an größte Lücke anpassen, größer = mehr Brücken)
-    gapCloseRadius = 20;
+    gapCloseRadius = 12;
     wireFG_closed = imclose(wireFG, strel('disk', gapCloseRadius));
 
     N = 20;                               % gewünschte Punktzahl entlang des Drahtes
