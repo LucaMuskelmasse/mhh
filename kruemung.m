@@ -72,44 +72,75 @@ for n = 1:ImageNummax
     % Vordergrund-Konvention: Draht = 1
     wireFG = ~bwImg;
 
-    wireFG = bwareaopen(wireFG, 300);
+    wireFG = bwareaopen(wireFG, 300);     % kleine Specks entfernen
 
-    % Lücken schließen (Radius an Lückengröße anpassen)
-    wireFG_closed = imclose(wireFG, strel('disk', 15));
+    % Lücken schließen (Radius an größte Lücke anpassen, größer = mehr Brücken)
+    gapCloseRadius = 20;
+    wireFG_closed = imclose(wireFG, strel('disk', gapCloseRadius));
 
-    % Skelettieren
-    skel = bwskel(wireFG_closed, 'MinBranchLength', 25);
+    N = 20;                               % gewünschte Punktzahl entlang des Drahtes
+    % Default-Werte, falls der Frame unbrauchbar ist (z.B. zerrissenes Skelett)
+    xs    = nan(1, N);
+    ys    = nan(1, N);
+    kappa = nan(1, N);
+    skel  = false(size(wireFG_closed));
 
-    endpts = bwmorph(skel, 'endpoints');
-    [ey, ex] = find(endpts);
-    x0 = ex(1); y0 = ey(1);
+    % Nur die größte zusammenhängende Komponente behalten
+    % -> entfernt isolierte Blasen und kleine Drahtfragmente
+    cc = bwconncomp(wireFG_closed);
+    if cc.NumObjects >= 1
+        [~, imax] = max(cellfun(@numel, cc.PixelIdxList));
+        wireMain = false(size(wireFG_closed));
+        wireMain(cc.PixelIdxList{imax}) = true;
 
+        % Skelettieren
+        skel = bwskel(wireMain, 'MinBranchLength', 25);
 
-    D = bwdistgeodesic(skel, x0, y0, 'quasi-euclidean');
+        endpts   = bwmorph(skel, 'endpoints');
+        [ey, ex] = find(endpts);
+        [yy, xx] = find(skel);
 
-    [yy, xx] = find(skel);
-    d = D(sub2ind(size(skel), yy, xx));
-    valid = isfinite(d);              % unerreichbare Pixel rausfiltern
-    [d, idx] = sort(d(valid));
-    xx = xx(valid); xx = xx(idx);
-    yy = yy(valid); yy = yy(idx);
+        if ~isempty(ex) && numel(yy) >= 2
+            x0 = ex(1); y0 = ey(1);
 
-    N = 20;                            % gewünschte Punktzahl
-    s = linspace(0, d(end), N);        % gleiche Abstände
-    xs = interp1(d, xx, s);
-    ys = interp1(d, yy, s);
+            D = bwdistgeodesic(skel, x0, y0, 'quasi-euclidean');
+            d = D(sub2ind(size(skel), yy, xx));
 
-    xs = smoothdata(xs, 'gaussian', 2);
-    ys = smoothdata(ys, 'gaussian', 2);
+            valid = isfinite(d);          % unerreichbare Pixel rausfiltern
+            d  = d(valid);
+            xx = xx(valid);
+            yy = yy(valid);
 
+            % unique sortiert aufsteigend UND entfernt doppelte Distanzen
+            % (interp1 braucht streng monotone Stützstellen)
+            [d, iu] = unique(d);
+            xx = xx(iu);
+            yy = yy(iu);
 
-    dx  = gradient(xs);
-    dy  = gradient(ys);
-    ddx = gradient(dx);
-    ddy = gradient(dy);
+            if numel(d) >= 2
+                s = linspace(0, d(end), N);    % gleiche Abstände
+                xs = interp1(d, xx, s);
+                ys = interp1(d, yy, s);
 
-    kappa = (dx.*ddy - dy.*ddx) ./ (dx.^2 + dy.^2).^(1.5);
-    kappa = abs(kappa);
+                xs = smoothdata(xs, 'gaussian', 2);
+                ys = smoothdata(ys, 'gaussian', 2);
+
+                dx  = gradient(xs);
+                dy  = gradient(ys);
+                ddx = gradient(dx);
+                ddy = gradient(dy);
+
+                kappa = (dx.*ddy - dy.*ddx) ./ (dx.^2 + dy.^2).^(1.5);
+                kappa = abs(kappa);
+            else
+                warning('Frame %d: zu wenige Skelettpunkte (<2) - wird mit NaN gefüllt.', n);
+            end
+        else
+            warning('Frame %d: kein verwertbares Skelett - wird mit NaN gefüllt.', n);
+        end
+    else
+        warning('Frame %d: kein Vordergrund gefunden - wird mit NaN gefüllt.', n);
+    end
 
 
     % --- In Struktur speichern ---
@@ -121,15 +152,15 @@ for n = 1:ImageNummax
     ImageData(n).xs = xs;
     ImageData(n).ys = ys;
     ImageData(n).kappa = kappa;
-    ImageData(n).mean_kappa = mean(kappa);
+    ImageData(n).mean_kappa = mean(kappa, 'omitnan');
     ImageData(n).path = imds.Files{n};
 
 end
 
 [Tu, ~, ic] = unique(T(1:end-10));                          % Tu: eindeutige Temperaturen (sortiert)
 mean_kappa_vec = [ImageData.mean_kappa].';
-mean_kappa_vec = mean_kappa_vec/max(mean_kappa_vec);
-kappaMean   = accumarray(ic, mean_kappa_vec(1:end-10), [], @mean);
+mean_kappa_vec = mean_kappa_vec/max(mean_kappa_vec, [], 'omitnan');
+kappaMean   = accumarray(ic, mean_kappa_vec(1:end-10), [], @(x) mean(x, 'omitnan'));
 figure(2)
 plot(Tu, kappaMean,'LineWidth',2,'Color',[0.8, 0.2, 0.6]);
 xlabel('Temperatur [°C]');
@@ -140,8 +171,8 @@ title('Mittlere Krümmung abhängig von Temperatur');
 figure;
 cmap = jet(256);
 allKappa = [ImageData.kappa];
-kMin = min(allKappa);
-kMax = max(ImageData(end).kappa);
+kMin = min(allKappa);            % min/max ignorieren NaN automatisch
+kMax = max(allKappa);
 
 for n = 1:ImageNummax
     imshow(ImageData(n).gray); hold on;
