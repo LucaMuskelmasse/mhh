@@ -44,7 +44,7 @@ for n = 1:ImageNummax
     grayImgFiltered = medfilt2(grayImg, [3 3]);
 
     % --- Binarisierung ---
-    level = 0.58;
+    level = 0.6;
     bwImg = imbinarize(grayImgFiltered, level);
 
     % ROI: außerhalb des interessanten Bereichs auf weiß setzen
@@ -75,7 +75,7 @@ for n = 1:ImageNummax
     wireFG = bwareaopen(wireFG, 300);     % kleine Specks entfernen
 
     % Lücken schließen (Radius an größte Lücke anpassen, größer = mehr Brücken)
-    gapCloseRadius = 12;
+    gapCloseRadius = 1;
     wireFG_closed = imclose(wireFG, strel('disk', gapCloseRadius));
 
     N = 20;                               % gewünschte Punktzahl entlang des Drahtes
