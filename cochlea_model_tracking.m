@@ -362,57 +362,84 @@ end
 
 %% Lokale Funktion: manuelle Kontrolle/Korrektur der Tip-Zuweisung
 function TipCoordinates = reviewTips(ImageData, TipCoordinates)
-% Zeigt alle Frames chronologisch nacheinander. Pro Frame:
-%   - Linksklick ins Bild -> Tip wird auf die geklickte Stelle gesetzt, weiter
-%   - Enter (Return)      -> Zuweisung übernehmen, weiter
-% Andere Tasten werden wie Enter behandelt (weiter ohne Änderung). Wird das
-% Fenster geschlossen, bricht die Kontrolle ab. Rückgabe: (ggf.) korrigiertes
-% TipCoordinates.
+% Chronologische Tip-Kontrolle ohne Latenz: Fenster, Bild und Marker werden
+% EINMAL angelegt und danach nur noch aktualisiert (kein imshow/ginput pro
+% Frame -> kein Flackern). Bedienung:
+%   - Pfeil rechts / links : nächstes / vorheriges Bild
+%   - Linksklick ins Bild  : Tip des aktuellen Frames auf die Klickstelle setzen
+%   - "Fertig" / Escape / Fenster schließen : Kontrolle beenden
+% Rückgabe: (ggf.) korrigiertes TipCoordinates.
 
     nImg = numel(ImageData);
+    cur  = 1;
 
     hFig = figure('Name', 'Tip-Kontrolle', 'NumberTitle', 'off');
     hAx  = axes('Parent', hFig);
 
-    for k = 1:nImg
-        if ~isvalid(hFig)          % Fenster geschlossen -> abbrechen
-            break;
-        end
+    % Bild + Marker EINMAL anlegen, danach nur noch Daten aktualisieren
+    hImg = imshow(ImageData(cur).rgb, 'Parent', hAx);
+    hold(hAx, 'on');
+    hCross = plot(hAx, NaN, NaN, 'r+', 'MarkerSize', 15, 'LineWidth', 2, ...
+        'PickableParts', 'none');     % Klicks gehen durch den Marker aufs Bild
+    hold(hAx, 'off');
+    hTitle = title(hAx, '');
 
-        % --- Bild + aktuelle Zuweisung zeichnen ---
-        imshow(ImageData(k).rgb, 'Parent', hAx);
-        hold(hAx, 'on');
-        tc = TipCoordinates(k, :);
+    % Event-Callbacks
+    set(hImg, 'ButtonDownFcn', @onClick);        % Klick aufs Bild
+    set(hFig, 'WindowKeyPressFcn', @onKey);      % Pfeiltasten
+    set(hFig, 'CloseRequestFcn', @(s,e) onClose());
+
+    % "Fertig"-Button
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Fertig', ...
+        'Units', 'normalized', 'Position', [0.85 0.01 0.14 0.06], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) onClose());
+
+    redraw();
+    uiwait(hFig);   % blockiert, bis das Fenster geschlossen / "Fertig" gedrückt wird
+
+    % ---------- verschachtelte Funktionen ----------
+    function redraw()
+        set(hImg, 'CData', ImageData(cur).rgb);
+        tc = TipCoordinates(cur, :);
         if all(tc ~= 0) && ~any(isnan(tc))
-            plot(hAx, tc(2), tc(1), 'r+', 'MarkerSize', 15, 'LineWidth', 2);
+            set(hCross, 'XData', tc(2), 'YData', tc(1));
             statusStr = sprintf('Tip = (%d, %d)', tc(2), tc(1));
         else
+            set(hCross, 'XData', NaN, 'YData', NaN);
             statusStr = 'kein Tip zugewiesen';
         end
-        title(hAx, sprintf(['Frame %d / %d   |   %s\n', ...
-            'Linksklick = Tip neu setzen      Enter = übernehmen'], ...
-            k, nImg, statusStr));
-        hold(hAx, 'off');
-
-        % --- Auf Linksklick oder Enter warten ---
-        try
-            [xc, yc, btn] = ginput(1);
-        catch
-            break;                 % Fenster wurde während des Wartens geschlossen
-        end
-
-        if isempty(btn)
-            % Enter/Return -> Zuweisung korrekt, nächstes Bild
-            continue;
-        elseif btn == 1
-            % Linksklick -> Tip neu zuweisen, dann nächstes Bild
-            TipCoordinates(k, :) = [round(yc), round(xc)];   % [row, col]
-        end
-        % alle anderen Tasten: keine Änderung, weiter zum nächsten Bild
+        set(hTitle, 'String', sprintf(['Frame %d / %d   |   %s\n', ...
+            'Pfeil rechts/links = vor/zurück    Linksklick = Tip setzen    Fertig = beenden'], ...
+            cur, nImg, statusStr));
     end
 
-    if isvalid(hFig)
-        close(hFig);
+    function gotoFrame(idx)
+        cur = min(max(idx, 1), nImg);
+        redraw();
+    end
+
+    function onKey(~, evt)
+        switch evt.Key
+            case 'rightarrow'
+                gotoFrame(cur + 1);
+            case 'leftarrow'
+                gotoFrame(cur - 1);
+            case 'escape'
+                onClose();
+        end
+    end
+
+    function onClick(~, ~)
+        cp = get(hAx, 'CurrentPoint');
+        TipCoordinates(cur, :) = [round(cp(1,2)), round(cp(1,1))];   % [row, col]
+        redraw();          % Marker sofort an die neue Stelle
+    end
+
+    function onClose()
+        if isvalid(hFig)
+            uiresume(hFig);
+            delete(hFig);
+        end
     end
 end
 
