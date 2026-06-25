@@ -85,11 +85,14 @@ for n = 1:ImageNummax
     kappa = nan(1, N);
     skel  = false(size(wireFG_closed));
 
-    % Nur die größte zusammenhängende Komponente behalten
-    % -> entfernt isolierte Blasen und kleine Drahtfragmente
+    % Die am stärksten langgestreckte Komponente als Draht wählen
+    % -> größte Hauptachsenlänge (MajorAxisLength) statt größter Fläche.
+    %    Robust gegen kompakte/runde Blasen, auch wenn diese dunkler sind
+    %    oder mehr Fläche haben als ein kurzes Drahtstück.
     cc = bwconncomp(wireFG_closed);
     if cc.NumObjects >= 1
-        [~, imax] = max(cellfun(@numel, cc.PixelIdxList));
+        stats = regionprops(cc, 'MajorAxisLength');
+        [~, imax] = max([stats.MajorAxisLength]);
         wireMain = false(size(wireFG_closed));
         wireMain(cc.PixelIdxList{imax}) = true;
 
