@@ -21,13 +21,13 @@ videoFullPath = fullfile(vidDir, vidFile);
 % Ab welchem Frame getrackt werden soll (die Elektrode ist am Videoanfang
 % noch nicht im Bild). 1 = ganz von vorne. Aus einer Zeit in Sekunden:
 % startFrame = round(startSekunden * v.FrameRate) + 1;
-startFrame = 1;
+startFrame = 40;
 
 % --- Background-Subtraction-Parameter ---
 % Der Hintergrund ist statisch und die Elektrode am Videoanfang noch nicht
 % im Bild -> die ersten Frames dienen als Hintergrund-Referenz.
 numBgFrames = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hintergrund
-fgThreshold = 0.10;  % Schwellwert (0..1) für die Differenz: größer = strenger
+fgThreshold = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
 minBlobSize = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
 
 v = VideoReader(videoFullPath);
@@ -134,7 +134,7 @@ xTip = round(xTip);
 yTip = round(yTip);
 
 % Tip mask parameters
-tipRadius = 25;
+tipRadius = 20;
 Mask_Tip = zeros(size(firstBW));
 
 % Create circular mask
