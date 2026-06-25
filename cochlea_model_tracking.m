@@ -324,7 +324,7 @@ end
 % Öffnet ein Fenster mit Slider durch die Bildfolge und dem zugewiesenen
 % roten Kreuz. Per Klick ins Bild kann der Tip für den aktuellen Frame neu
 % gesetzt werden. Erst nach Klick auf "Bestätigen" läuft das Programm weiter.
-TipCoordinates = reviewTips(ImageData, TipCoordinates, tipRadius);
+TipCoordinates = reviewTips(ImageData, TipCoordinates);
 
     % --- Neu zugewiesene Trajektorie speichern (für nächsten Programmstart) ---
     save(trajFile, 'TipCoordinates');
@@ -361,81 +361,58 @@ end
 
 
 %% Lokale Funktion: manuelle Kontrolle/Korrektur der Tip-Zuweisung
-function TipCoordinates = reviewTips(ImageData, TipCoordinates, tipRadius)
-% Slider zum Durchblättern der Bildfolge, Klick ins Bild setzt den Tip des
-% aktuellen Frames neu. Mit "Bestätigen" wird die Kontrolle beendet und das
-% (ggf. korrigierte) TipCoordinates zurückgegeben.
+function TipCoordinates = reviewTips(ImageData, TipCoordinates)
+% Zeigt alle Frames chronologisch nacheinander. Pro Frame:
+%   - Linksklick ins Bild -> Tip wird auf die geklickte Stelle gesetzt, weiter
+%   - Enter (Return)      -> Zuweisung übernehmen, weiter
+% Andere Tasten werden wie Enter behandelt (weiter ohne Änderung). Wird das
+% Fenster geschlossen, bricht die Kontrolle ab. Rückgabe: (ggf.) korrigiertes
+% TipCoordinates.
 
     nImg = numel(ImageData);
-    cur  = 1;
 
     hFig = figure('Name', 'Tip-Kontrolle', 'NumberTitle', 'off');
-    hAx  = axes('Parent', hFig, 'Position', [0.05 0.20 0.9 0.74]);
+    hAx  = axes('Parent', hFig);
 
-    % Slider zum Vor-/Zurückspulen durch die Frames
-    if nImg > 1
-        smallStep  = 1/(nImg-1);
-        sliderStep = [smallStep, max(smallStep, 10/(nImg-1))];
-    else
-        sliderStep = [1 1];
-    end
-    hSlider = uicontrol('Parent', hFig, 'Style', 'slider', ...
-        'Units', 'normalized', 'Position', [0.10 0.08 0.60 0.05], ...
-        'Min', 1, 'Max', max(nImg,2), 'Value', 1, ...
-        'SliderStep', sliderStep, 'Callback', @onSlide);
-    addlistener(hSlider, 'Value', 'PostSet', @(s,e) onSlide());
-
-    % Hinweistext
-    uicontrol('Parent', hFig, 'Style', 'text', 'Units', 'normalized', ...
-        'Position', [0.10 0.135 0.60 0.035], ...
-        'String', 'Slider: Frame wählen   |   Klick ins Bild: Tip neu zuweisen');
-
-    % Bestätigen-Button
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Bestätigen', ...
-        'Units', 'normalized', 'Position', [0.74 0.08 0.18 0.06], ...
-        'FontWeight', 'bold', 'Callback', @onConfirm);
-
-    drawFrame();
-    uiwait(hFig);   % blockiert das Skript, bis "Bestätigen" gedrückt wird
-
-    % ---------- verschachtelte Callback-Funktionen ----------
-    function onSlide(~, ~)
-        cur = min(max(round(hSlider.Value), 1), nImg);
-        drawFrame();
-    end
-
-    function onClick(~, ~)
-        cp = get(hAx, 'CurrentPoint');
-        xClick = round(cp(1,1));
-        yClick = round(cp(1,2));
-        TipCoordinates(cur, :) = [yClick, xClick];   % [row, col]
-        drawFrame();
-    end
-
-    function onConfirm(~, ~)
-        if isvalid(hFig)
-            uiresume(hFig);
-            close(hFig);
+    for k = 1:nImg
+        if ~isvalid(hFig)          % Fenster geschlossen -> abbrechen
+            break;
         end
-    end
 
-    function drawFrame()
-        hImg = imshow(ImageData(cur).rgb, 'Parent', hAx);
-        set(hImg, 'ButtonDownFcn', @onClick);   % Klick aufs Bild -> Tip neu setzen
+        % --- Bild + aktuelle Zuweisung zeichnen ---
+        imshow(ImageData(k).rgb, 'Parent', hAx);
         hold(hAx, 'on');
-
-        tc = TipCoordinates(cur, :);
+        tc = TipCoordinates(k, :);
         if all(tc ~= 0) && ~any(isnan(tc))
-            % rotes Kreuz auf zugewiesener Tip-Position
-            plot(hAx, tc(2), tc(1), 'r+', 'MarkerSize', 15, 'LineWidth', 2, ...
-                'HitTest', 'off');
+            plot(hAx, tc(2), tc(1), 'r+', 'MarkerSize', 15, 'LineWidth', 2);
             statusStr = sprintf('Tip = (%d, %d)', tc(2), tc(1));
         else
-            statusStr = 'kein Tip zugewiesen - bitte ins Bild klicken';
+            statusStr = 'kein Tip zugewiesen';
+        end
+        title(hAx, sprintf(['Frame %d / %d   |   %s\n', ...
+            'Linksklick = Tip neu setzen      Enter = übernehmen'], ...
+            k, nImg, statusStr));
+        hold(hAx, 'off');
+
+        % --- Auf Linksklick oder Enter warten ---
+        try
+            [xc, yc, btn] = ginput(1);
+        catch
+            break;                 % Fenster wurde während des Wartens geschlossen
         end
 
-        title(hAx, sprintf('Frame %d / %d   |   %s', cur, nImg, statusStr));
-        hold(hAx, 'off');
+        if isempty(btn)
+            % Enter/Return -> Zuweisung korrekt, nächstes Bild
+            continue;
+        elseif btn == 1
+            % Linksklick -> Tip neu zuweisen, dann nächstes Bild
+            TipCoordinates(k, :) = [round(yc), round(xc)];   % [row, col]
+        end
+        % alle anderen Tasten: keine Änderung, weiter zum nächsten Bild
+    end
+
+    if isvalid(hFig)
+        close(hFig);
     end
 end
 
