@@ -74,6 +74,16 @@ for n = 1:ImageNummax
 
     wireFG = bwareaopen(wireFG, 300);     % kleine Specks entfernen
 
+    % --- Luftblasen per Dicken-Trennung (morphologisches Opening) entfernen ---
+    % Ein Opening mit Radius > halbe Drahtbreite "frisst" den dünnen Draht weg
+    % und lässt nur die dicken Blasen übrig. Diese werden dann abgezogen.
+    % bubbleOpenRadius an die Drahtbreite anpassen:
+    %   - Draht verschwindet  -> Wert verkleinern
+    %   - Blasen bleiben übrig -> Wert vergrößern
+    bubbleOpenRadius = 8;
+    bubbleMask = imopen(wireFG, strel('disk', bubbleOpenRadius));
+    wireFG = wireFG & ~bubbleMask;
+
     % Lücken schließen (Radius an größte Lücke anpassen, größer = mehr Brücken)
     gapCloseRadius = 12;
     wireFG_closed = imclose(wireFG, strel('disk', gapCloseRadius));
