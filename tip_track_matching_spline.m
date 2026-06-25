@@ -65,6 +65,25 @@ end
 % elapsedTime = toc;
 % fprintf('Total time to read and process %d images: %.2f seconds\n', ImageNummax, elapsedTime);
 
+%% Trajektorie: vorhandene laden oder neu zuweisen?
+% Pro Bildordner wird die zugewiesene Trajektorie als .mat gespeichert.
+% Nur wenn eine solche Datei existiert, wird gefragt; sonst direkt neu.
+trajFile = fullfile(ImgPath, 'tip_trajectory.mat');
+useExisting = false;
+if isfile(trajFile)
+    choice = questdlg(['Für diesen Ordner existiert bereits eine gespeicherte ', ...
+        'Trajektorie. Möchtest du die alte verwenden oder eine neue zuweisen?'], ...
+        'Trajektorie laden', 'Alte verwenden', 'Neu zuweisen', 'Alte verwenden');
+    useExisting = strcmp(choice, 'Alte verwenden');
+end
+
+if useExisting
+    % --- Alte Trajektorie laden: ROI-Auswahl, Tracking und Kontrolle entfallen ---
+    S = load(trajFile, 'TipCoordinates', 'T', 't_rel');
+    TipCoordinates = S.TipCoordinates;
+    T              = S.T;
+    t_rel          = S.t_rel;
+else
 %% 3. Manually create fixed binary masks: workspace and tip
 % Only applied to the first binarized image
 firstBW = ImageData(1).bw;
@@ -497,6 +516,11 @@ t_rel = seconds(timestamp - timestamp(1));     % Sekunden seit Start
 % roten Kreuz. Per Klick ins Bild kann der Tip für den aktuellen Frame neu
 % gesetzt werden. Erst nach Klick auf "Bestätigen" läuft das Programm weiter.
 TipCoordinates = reviewTips(ImageData, TipCoordinates, tipRadius);
+
+    % --- Neu zugewiesene Trajektorie speichern (für nächsten Programmstart) ---
+    save(trajFile, 'TipCoordinates', 'T', 't_rel');
+    fprintf('Trajektorie gespeichert: %s\n', trajFile);
+end
 
 
 %% Visualize Tip trajectory
