@@ -9,7 +9,7 @@
 clear; clc; close all;
 
 %% 1. Select MP4 video file with default path
-defaultPath = 'M:\nascas2\Projects\MemoryCI 2.0\1 Dokumentation\AP01_Iterative Inlay-Entwicklung\AP 1.B BFR-Tests\Testergebnisse\2026-06-23-MV71-11-MV71-12';
+defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Flex_EA';
 [vidFile, vidDir] = uigetfile({'*.mp4','MP4 Video (*.mp4)'; '*.*','Alle Dateien (*.*)'}, ...
     'Select MP4 video', defaultPath);
 if isequal(vidFile, 0)
@@ -18,8 +18,17 @@ end
 videoFullPath = fullfile(vidDir, vidFile);
 
 %% 2. Read video frames with VideoReader
+% Ab welchem Frame getrackt werden soll (die Elektrode ist am Videoanfang
+% noch nicht im Bild). 1 = ganz von vorne. Aus einer Zeit in Sekunden:
+% startFrame = round(startSekunden * v.FrameRate) + 1;
+startFrame = 1;
+
 v = VideoReader(videoFullPath);
-ImageNummax = v.NumFrames;
+totalFrames = v.NumFrames;
+
+% Startframe absichern und Anzahl der zu verarbeitenden Frames bestimmen
+startFrame  = min(max(round(startFrame), 1), totalFrames);
+ImageNummax = totalFrames - startFrame + 1;
 
 % Initialize structure array
 ImageData = struct('name', [], 'path', [], 'rgb', [], 'bw', []);
@@ -27,7 +36,8 @@ ImageData(ImageNummax).name = []; % Preallocate
 
 % Read and process frames one by one (RGB stored, median filtered per channel)
 for n = 1:ImageNummax
-    img = read(v, n);
+    frameIdx = startFrame + n - 1;   % echte Frame-Nummer im Video
+    img = read(v, frameIdx);
 
     % Sicherstellen, dass das Bild RGB ist (createMask erwartet 3 Kanäle)
     if size(img,3) == 1
@@ -48,7 +58,7 @@ for n = 1:ImageNummax
     bwImg = ~createMask(rgbFiltered);
 
     % Save into structure array
-    ImageData(n).name = sprintf('frame_%05d', n);  % Frame index as name
+    ImageData(n).name = sprintf('frame_%05d', frameIdx);  % echte Frame-Nummer im Video
     ImageData(n).rgb  = rgbFiltered;               % RGB image (median filtered)
     ImageData(n).bw   = bwImg;                      % Binarized image (color mask)
     ImageData(n).path = videoFullPath;             % Source video
