@@ -103,10 +103,44 @@ if useExisting
     % --- Alte Trajektorie laden: ROI-Auswahl, Tracking und Kontrolle entfallen ---
     S = load(trajFile, 'TipCoordinates');
     TipCoordinates = S.TipCoordinates;
+
+    % Referenzpunkte (Mittelpunkt + Eingang) laden, falls vorhanden.
+    % Alte .mat-Dateien ohne diese Punkte -> jetzt per Klick nachsetzen.
+    vars = whos('-file', trajFile);
+    if any(strcmp({vars.name}, 'cochleaCenter')) && ...
+       any(strcmp({vars.name}, 'cochleaEntrance'))
+        Sref = load(trajFile, 'cochleaCenter', 'cochleaEntrance');
+        cochleaCenter   = Sref.cochleaCenter;     % [x, y] = [col, row]
+        cochleaEntrance = Sref.cochleaEntrance;   % [x, y] = [col, row]
+    else
+        figure;
+        imshow(ImageData(1).rgb); hold on;
+        title('Gespeicherte Datei ohne Referenzpunkte: Mittelpunkt (1), dann Eingang (2) klicken');
+        [cx, cy] = ginput(1); cochleaCenter   = [round(cx), round(cy)];
+        plot(cochleaCenter(1), cochleaCenter(2), 'c+', 'MarkerSize', 15, 'LineWidth', 2);
+        [ex, ey] = ginput(1); cochleaEntrance = [round(ex), round(ey)];
+        plot(cochleaEntrance(1), cochleaEntrance(2), 'm+', 'MarkerSize', 15, 'LineWidth', 2);
+        % nachträglich mit in die Trajektorien-Datei schreiben
+        save(trajFile, 'cochleaCenter', 'cochleaEntrance', '-append');
+    end
 else
 %% 3. Manually create fixed binary masks: workspace and tip
 % Only applied to the first binarized image
 firstBW = ImageData(1).bw;
+
+% --- Referenzpunkte fürs Cochleamodell zuerst per Linksklick setzen ---
+% 1. Klick: Mittelpunkt des Cochleamodells
+% 2. Klick: Eingang der Elektrode in das Cochleamodell
+% (auf dem RGB-Bild, damit die Anatomie gut sichtbar ist)
+figure;
+imshow(ImageData(1).rgb); hold on;
+title('Referenzpunkte: erst Mittelpunkt des Cochleamodells (1), dann Eingang (2) klicken');
+[cx, cy] = ginput(1); cochleaCenter   = [round(cx), round(cy)];   % [x, y] = [col, row]
+plot(cochleaCenter(1), cochleaCenter(2), 'c+', 'MarkerSize', 15, 'LineWidth', 2);
+[ex, ey] = ginput(1); cochleaEntrance = [round(ex), round(ey)];   % [x, y] = [col, row]
+plot(cochleaEntrance(1), cochleaEntrance(2), 'm+', 'MarkerSize', 15, 'LineWidth', 2);
+plot([cochleaCenter(1) cochleaEntrance(1)], [cochleaCenter(2) cochleaEntrance(2)], ...
+    'm-', 'LineWidth', 1.5);
 
 figure;
 imshow(firstBW); hold on;
@@ -348,7 +382,7 @@ end
 TipCoordinates = reviewTips(ImageData, TipCoordinates);
 
     % --- Neu zugewiesene Trajektorie speichern (für nächsten Programmstart) ---
-    save(trajFile, 'TipCoordinates');
+    save(trajFile, 'TipCoordinates', 'cochleaCenter', 'cochleaEntrance');
     fprintf('Trajektorie gespeichert: %s\n', trajFile);
 end
 
@@ -378,6 +412,52 @@ if ~isempty(TipCoordsValid)
     xs = spline(t, TipCoordsValid(:,2), ts);
     ys = spline(t, TipCoordsValid(:,1), ts);
     plot(xs, ys, 'b-', 'LineWidth', 2);
+
+    % Referenzpunkte und Referenzlinie (Mittelpunkt -> Eingang) einzeichnen
+    plot(cochleaCenter(1),   cochleaCenter(2),   'c+', 'MarkerSize', 15, 'LineWidth', 2);
+    plot(cochleaEntrance(1), cochleaEntrance(2), 'm+', 'MarkerSize', 15, 'LineWidth', 2);
+    plot([cochleaCenter(1) cochleaEntrance(1)], [cochleaCenter(2) cochleaEntrance(2)], ...
+        'm-', 'LineWidth', 1.5);
+    legend({'Tip', 'Tip-Linie', 'Spline', 'Mittelpunkt', 'Eingang', 'Referenzlinie'}, ...
+        'Location', 'best');
+end
+
+
+%% Winkel zwischen Referenzlinie (Mittelpunkt->Eingang) und Tip-Linie (Mittelpunkt->Tip)
+% Vorzeichen: gegen den Uhrzeigersinn = positiv, so wie es im angezeigten Bild
+% aussieht (die y-Achse zeigt im Bild nach unten -> beim Kreuzprodukt
+% berücksichtigt). Verlauf wird über die Frames entfaltet (unwrap), kann also
+% >180° / >360° werden (anguläre Insertionstiefe). Null = Tip auf der
+% Mittelpunkt->Eingang-Linie.
+cx = cochleaCenter(1);   cy = cochleaCenter(2);     % [x, y] = [col, row]
+ax = cochleaEntrance(1) - cx;                       % Referenzvektor (Eingang)
+ay = cochleaEntrance(2) - cy;
+
+nImg = size(TipCoordinates, 1);
+angleDeg = nan(nImg, 1);
+for k = 1:nImg
+    tc = TipCoordinates(k, :);                      % [row, col]
+    if all(tc ~= 0) && ~any(isnan(tc))
+        bx = tc(2) - cx;                            % Tip-Vektor (col = x)
+        by = tc(1) - cy;                            % (row = y)
+        % atan2(-Kreuzprodukt, Skalarprodukt): -Kreuz dreht das y-nach-unten-
+        % Bild auf "visuell gegen den Uhrzeigersinn = positiv".
+        angleDeg(k) = atan2d(ay*bx - ax*by, ax*bx + ay*by);
+    end
+end
+
+valid = ~isnan(angleDeg);
+if any(valid)
+    angleUnwrapped = nan(nImg, 1);
+    % unwrap arbeitet in Radiant und nur auf den gültigen Frames
+    angleUnwrapped(valid) = rad2deg(unwrap(deg2rad(angleDeg(valid))));
+
+    figure(4);
+    plot(find(valid), angleUnwrapped(valid), 'b.-', 'LineWidth', 1.5, 'MarkerSize', 12);
+    grid on;
+    xlabel('Frame');
+    ylabel('Winkel [°]');
+    title('Winkel zwischen Referenzlinie und Tip-Linie (gegen Uhrzeigersinn positiv)');
 end
 
 
