@@ -48,7 +48,7 @@ minBlobSize = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden ent
 % --- Live-Vorschau während des Durchlaufs ---
 showPreview = true;  % true = aktuellen Frame + Tip beim Durchlauf anzeigen
 
-defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Flex_EA';
+defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
 
 %% 1. ORDNER mit MP4-Videos auswählen
 vidDir = uigetdir(defaultPath, 'Ordner mit MP4-Videos auswählen');
