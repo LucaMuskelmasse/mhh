@@ -1,16 +1,20 @@
-% Function (Schritt 1 - automatische Tip-Zuweisung, Aufbau):
+% Function (Schritt 2 - automatische Tip-Zuweisung):
 % 1. Eine .mat mit der zuvor festgelegten Trajektorie öffnen (TipCoordinates)
 % 2. Ein MP4-Video öffnen
 % 3. Hintergrund-Referenz aus den ersten Frames bilden (Background Subtraction)
-% 4. Den LETZTEN Frame per Background Subtraction segmentieren und anzeigen
+% 4. Frame 300 per Background Subtraction segmentieren und anzeigen
 % 5. Mittelpunkt per Klick wählen; Trajektorie als rote Kreuze einzeichnen;
 %    um jedes Kreuz ein rotes, an Tangente/Normale ausgerichtetes Viereck,
 %    dessen Breite und Höhe linear mit dem Abstand zum Mittelpunkt wachsen
 %    (jede Ecke einzeln skaliert -> Trapeze / echte Vierecke).
+% 6. Trapeze als Suchflächen: vom mittelpunktsnächsten Endpunkt der Trajektorie
+%    Richtung Anfang durchgehen. Im ersten Trapez, in dem schwarze Pixel
+%    (Vordergrund/Elektrode) auftauchen, den Schwerpunkt der GRÖSSTEN schwarzen
+%    Fläche bestimmen und mit einem grünen Kreuz markieren.
 %
 % Es gibt KEINE Tip-Zuweisung per Suchradius und KEINE manuelle Korrektur mehr
 % (gegenüber cochlea_model_tracking.m bewusst entfernt). Background Subtraction
-% bleibt erhalten. Die weiteren Schritte folgen.
+% bleibt erhalten.
 
 clear; clc; close all;
 
@@ -29,6 +33,9 @@ heightSlope = 0.5;   % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
 numBgFrames = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hintergrund
 fgThreshold = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
 minBlobSize = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
+
+% --- Anzuzeigender / auszuwertender Frame ---
+trackFrame  = 300;   % Frame, der segmentiert und durchsucht wird
 
 defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Flex_EA';
 
@@ -67,21 +74,22 @@ for b = 1:nbg
 end
 bgGray = medfilt2(bgAccum / nbg, [3 3]);   % statischer Hintergrund
 
-%% 4. Letzten Frame per Background Subtraction segmentieren
-imgLast = read(v, totalFrames);
-if size(imgLast,3) == 1
-    imgLast = repmat(imgLast, [1 1 3]);
+%% 4. Frame 300 per Background Subtraction segmentieren
+frameIdx = min(max(round(trackFrame), 1), totalFrames);  % Sicherung gegen kurze Videos
+imgFrame = read(v, frameIdx);
+if size(imgFrame,3) == 1
+    imgFrame = repmat(imgFrame, [1 1 3]);
 end
-rgbFiltered = imgLast;
+rgbFiltered = imgFrame;
 for ch = 1:3
-    rgbFiltered(:,:,ch) = medfilt2(imgLast(:,:,ch), [3 3]);
+    rgbFiltered(:,:,ch) = medfilt2(imgFrame(:,:,ch), [3 3]);
 end
 
 grayImg = double(rgb2gray(rgbFiltered));
 diffImg = abs(grayImg - bgGray) / 255;     % normierte Differenz 0..1
 fg = diffImg > fgThreshold;                % Vordergrund (Elektrode) = true
 fg = bwareaopen(fg, minBlobSize);          % kleine Störpixel entfernen
-bwLast = ~fg;                              % Elektrode = 0 (schwarz), Hintergrund = 1 (weiß)
+bwFrame = ~fg;                             % Elektrode = 0 (schwarz), Hintergrund = 1 (weiß)
 
 %% 5. Mittelpunkt wählen, dann Trajektorie + abstandsabhängige Vierecke anzeigen
 xs = TipCoordinates(:,2);   % x = Spalte
@@ -98,13 +106,13 @@ ty = ty ./ tlen;
 nx = -ty;
 ny =  tx;
 
-% --- Letzten Frame zeigen und Mittelpunkt anklicken (vor der Trajektorie) ---
-figure('Name', 'Vierecke (letzter Frame)', 'NumberTitle', 'off');
-imshow(bwLast); hold on;
+% --- Frame zeigen und Mittelpunkt anklicken (vor der Trajektorie) ---
+figure('Name', sprintf('Vierecke (Frame %d)', frameIdx), 'NumberTitle', 'off');
+imshow(bwFrame); hold on;
 title('Mittelpunkt anklicken (Viereckgröße wächst mit Abstand dazu)');
 [xM, yM] = ginput(1);
 M = [xM, yM];
-plot(xM, yM, 'gx', 'MarkerSize', 16, 'LineWidth', 2);   % Mittelpunkt
+plot(xM, yM, 'cx', 'MarkerSize', 16, 'LineWidth', 2);   % Mittelpunkt (cyan)
 
 % --- Trajektorie als rote Kreuze ---
 plot(xs, ys, 'r+', 'MarkerSize', 10, 'LineWidth', 1.5);
@@ -113,7 +121,9 @@ plot(xs, ys, 'r+', 'MarkerSize', 10, 'LineWidth', 1.5);
 % Vorzeichen-Kombinationen der vier Ecken (entlang Tangente / Normale)
 signs = [ +1 +1;  +1 -1;  -1 -1;  -1 +1 ];
 
-for i = 1:numel(xs)
+nP = numel(xs);
+allCorners = cell(nP, 1);   % je Punkt die 5x2-Eckpunkte (geschlossenes Polygon)
+for i = 1:nP
     P = [xs(i), ys(i)];
     T = [tx(i), ty(i)];   % Einheits-Tangente
     N = [nx(i), ny(i)];   % Einheits-Normale
@@ -134,10 +144,47 @@ for i = 1:numel(xs)
         corners(c,:) = P + sx*halfW*T + sy*halfH*N;
     end
     corners(5,:) = corners(1,:);   % Polygon schließen
+    allCorners{i} = corners;
 
     plot(corners(:,1), corners(:,2), 'r-', 'LineWidth', 1.5);
 end
 
-title(sprintf(['Letzter Frame (Background Subtraction) - %d Vierecke ', ...
-    '(Größe ~ Abstand zum Mittelpunkt)'], numel(xs)));
+%% 6. Trapeze als Suchflächen: Tip automatisch finden
+% Durchlaufreihenfolge: an dem Endpunkt der Trajektorie beginnen, der dem
+% Mittelpunkt M am nächsten liegt, und Richtung anderes Ende durchgehen.
+dFirst = hypot(xs(1)   - M(1), ys(1)   - M(2));
+dLast  = hypot(xs(end) - M(1), ys(end) - M(2));
+if dLast <= dFirst
+    order = nP:-1:1;   % letzter Punkt ist näher an M -> von hinten nach vorne
+else
+    order = 1:nP;      % erster Punkt ist näher an M -> von vorne nach hinten
+end
+
+% Schwarze Pixel im Bild = Vordergrund (Elektrode) = fg == true
+tipFound = false;
+tipXY    = [NaN NaN];
+for i = order
+    poly = allCorners{i};
+    mask = poly2mask(poly(:,1), poly(:,2), v.Height, v.Width);  % Trapez als Maske
+    blackInside = fg & mask;                 % schwarze Pixel innerhalb des Trapezes
+    if any(blackInside(:))
+        cc = bwconncomp(blackInside);
+        rp = regionprops(cc, 'Area', 'Centroid');
+        [~, k] = max([rp.Area]);             % größte zusammenhängende schwarze Fläche
+        tipXY = rp(k).Centroid;              % [x, y] = [col, row]
+        % gefundenes Trapez hervorheben + Schwerpunkt als grünes Kreuz
+        plot(poly(:,1), poly(:,2), 'g-', 'LineWidth', 2);
+        plot(tipXY(1), tipXY(2), 'gx', 'MarkerSize', 16, 'LineWidth', 2.5);
+        tipFound = true;
+        break;
+    end
+end
+
+if tipFound
+    title(sprintf(['Frame %d - Tip gefunden bei (x=%.1f, y=%.1f)  ', ...
+        '(Schwerpunkt der größten schwarzen Fläche)'], frameIdx, tipXY(1), tipXY(2)));
+else
+    title(sprintf('Frame %d - kein Trapez mit schwarzen Pixeln gefunden', frameIdx));
+    warning('In keinem Trapez wurden schwarze Pixel gefunden.');
+end
 hold off;
