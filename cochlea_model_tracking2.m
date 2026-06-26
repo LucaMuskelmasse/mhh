@@ -337,6 +337,10 @@ for vi = 1:numVideos
         angleUnwrapped = nan(nImg, 1);
         angleUnwrapped(valid) = rad2deg(unwrap(deg2rad(angleDeg(valid))));
 
+        % Geglätteter Winkel (gleitender Mittelwert über die gültigen Werte)
+        angleSmooth = nan(nImg, 1);
+        angleSmooth(valid) = smooth(angleUnwrapped(valid), smoothSpan);
+
         % --- Pro Frame TimeStamp + Kraft z aus der CSV ---
         % Spalte Y enthält die Frame-Nummer. Für jeden Frame f wird die ERSTE
         % CSV-Zeile gesucht, deren Frame-Nummer == f ist, und von dort TimeStamp
@@ -376,8 +380,6 @@ for vi = 1:numVideos
         % --- Geglätteter Winkel über TimeStamp ---
         if haveCSV
             vT = valid & ~isnan(tsFrame);
-            angleSmooth = angleUnwrapped;
-            angleSmooth(vT) = smooth(angleUnwrapped(vT), smoothSpan);
             figure('Name', ['Winkel (geglättet) über TimeStamp ' vLabel], 'NumberTitle', 'off');
             hold on;
             plot(tsFrame(vT), angleUnwrapped(vT), 'Color', [0.7 0.7 0.7], ...
@@ -403,6 +405,22 @@ for vi = 1:numVideos
             ylabel('Kraft z-Richtung (Spalte C)');
             title(sprintf('Kraft z über Winkel (%s)', vLabel));
         end
+
+        % --- Alle Ergebnisse in einem Struct sammeln ---
+        % Felder: Frame, TimeStamp, Kraft (z), Winkel, geglätteter Winkel.
+        results = struct( ...
+            'video',         vidName, ...
+            'label',         vLabel, ...
+            'frame',         (1:nImg).', ...
+            'timestamp',     tsFrame, ...
+            'force',         fzFrame, ...
+            'angle',         angleUnwrapped, ...
+            'angleSmoothed', angleSmooth);
+
+        % Neben dem Video als <videoname>_results.mat speichern
+        resFile = fullfile(vidDir, [vidName '_results.mat']);
+        save(resFile, 'results');
+        fprintf('[%s] Ergebnisse gespeichert: %s\n', vLabel, resFile);
     end
 
     % Plots bleiben offen; automatisch weiter zum nächsten Video
