@@ -5,8 +5,9 @@
 %    von create_trajectory.m) auswählen - sie gilt für ALLE Videos im Ordner.
 % 3. Jedes Video nacheinander mit demselben Algorithmus bearbeiten:
 %    - Passende Messdaten-CSV laden (<...>_F1.csv, deutsches Format: ; und ,),
-%      mit TimeStamp (Spalte U) und Kraft in z-Richtung (Spalte C). Eine Zeile
-%      pro Frame (1:1).
+%      mit TimeStamp (Spalte U), Kraft in z-Richtung (Spalte C) und Frame-Nummer
+%      (Spalte Y). Zu jedem Frame wird die ERSTE Zeile mit dieser Frame-Nummer
+%      verwendet.
 %    - Hintergrund-Referenz aus den ersten Frames bilden (Background Subtraction)
 %    - Pro Trajektorienpunkt ein an Tangente/Normale ausgerichtetes Viereck,
 %      dessen Breite/Höhe linear mit dem Abstand zum Mittelpunkt wachsen
@@ -97,14 +98,16 @@ for vi = 1:numVideos
 
     fprintf('\n=== Video %d/%d: %s (%s) ===\n', vi, numVideos, vidFile, vLabel);
 
-    %% 2b. Passende Messdaten-CSV laden (TimeStamp Spalte U, Kraft z Spalte C)
+    %% 2b. Passende Messdaten-CSV laden (TimeStamp Spalte U, Kraft z Spalte C, Frame Spalte Y)
     % Dateiname des Videos ohne "_Camera1" -> CSV-Name (z.B. ..._F1.csv).
     % Deutsches Format: ';' als Trennzeichen, ',' als Dezimalzeichen, 1 Kopfzeile.
-    % 1:1-Zuordnung: CSV-Zeile k gehört zu Frame k.
+    % Spalte Y (25) gibt die Frame-Nummer an; zu jedem Frame wird später die
+    % ERSTE Zeile mit dieser Frame-Nummer verwendet.
     csvBase = regexprep(vidName, '_Camera1$', '');
     csvFile = fullfile(vidDir, [csvBase '.csv']);
-    csvTime  = [];   % Spalte U
-    csvForce = [];   % Spalte C
+    csvTime    = [];   % Spalte U
+    csvForce   = [];   % Spalte C
+    csvFrameNo = [];   % Spalte Y
     if isfile(csvFile)
         txt  = fileread(csvFile);
         txt  = strrep(txt, ',', '.');                    % Dezimalkomma -> Dezimalpunkt
@@ -113,12 +116,14 @@ for vi = 1:numVideos
         if numel(rows) >= 2
             rows = rows(2:end);                          % Kopfzeile überspringen
             nCsv = numel(rows);
-            csvTime  = nan(nCsv, 1);
-            csvForce = nan(nCsv, 1);
+            csvTime    = nan(nCsv, 1);
+            csvForce   = nan(nCsv, 1);
+            csvFrameNo = nan(nCsv, 1);
             for r = 1:nCsv
                 fld = strsplit(rows{r}, ';', 'CollapseDelimiters', false);
-                if numel(fld) >= 21, csvTime(r)  = str2double(fld{21}); end  % Spalte U
-                if numel(fld) >=  3, csvForce(r) = str2double(fld{3});  end  % Spalte C
+                if numel(fld) >= 21, csvTime(r)    = str2double(fld{21}); end  % Spalte U
+                if numel(fld) >=  3, csvForce(r)   = str2double(fld{3});  end  % Spalte C
+                if numel(fld) >= 25, csvFrameNo(r) = str2double(fld{25}); end  % Spalte Y
             end
         end
     else
@@ -329,17 +334,24 @@ for vi = 1:numVideos
         angleUnwrapped = nan(nImg, 1);
         angleUnwrapped(valid) = rad2deg(unwrap(deg2rad(angleDeg(valid))));
 
-        % --- Pro Frame TimeStamp + Kraft z aus der CSV (1:1: Zeile k = Frame k) ---
+        % --- Pro Frame TimeStamp + Kraft z aus der CSV ---
+        % Spalte Y enthält die Frame-Nummer. Für jeden Frame f wird die ERSTE
+        % CSV-Zeile gesucht, deren Frame-Nummer == f ist, und von dort TimeStamp
+        % (Spalte U) und Kraft z (Spalte C) übernommen.
         tsFrame = nan(nImg, 1);   % TimeStamp (Spalte U) je Frame
         fzFrame = nan(nImg, 1);   % Kraft z   (Spalte C) je Frame
-        haveCSV = ~isempty(csvTime);
+        haveCSV = ~isempty(csvTime) && ~isempty(csvFrameNo);
         if haveCSV
-            m = min(nImg, numel(csvTime));
-            tsFrame(1:m) = csvTime(1:m);
-            fzFrame(1:m) = csvForce(1:m);
-            if numel(csvTime) ~= nImg
-                warning('[%s] CSV-Zeilen (%d) != Frames (%d); es wird bis %d zugeordnet.', ...
-                    vLabel, numel(csvTime), nImg, m);
+            for f = 1:nImg
+                idx = find(csvFrameNo == f, 1, 'first');   % erstes Auftreten von Frame f
+                if ~isempty(idx)
+                    tsFrame(f) = csvTime(idx);
+                    fzFrame(f) = csvForce(idx);
+                end
+            end
+            if all(isnan(tsFrame))
+                warning(['[%s] Keine Frame-Nummer aus Spalte Y passte zu den Video-Frames ', ...
+                    '(1..%d). Stimmt die Nummerierung (0- vs 1-basiert)?'], vLabel, nImg);
             end
         end
 
