@@ -6,7 +6,8 @@ verlieren. Stand: 2026-06-26.
 
 Das Repository enthält die **Bildauswertungs- / Tracking-Skripte**
 (Auswertung der aufgenommenen Bilder bzw. Videos): `kruemung.m`,
-`tip_track_matching_spline.m`, `cochlea_model_tracking.m`.
+`tip_track_matching_spline.m`, `cochlea_model_tracking.m`,
+`create_trajectory.m`.
 
 (Die Versuchssteuerungs-/Hardware-Skripte `bfrAufnahmeApp.m`, `listKameras.m`
 und `testKameras.m` liegen in einem anderen Branch und sind hier bewusst nicht
@@ -195,6 +196,32 @@ berechnet.
   Temperatur im Dateinamen).
 - Zuletzt: Ordner-Stapelverarbeitung mehrerer Videos + Referenzpunkte +
   Winkel-Plot ergänzt.
+
+---
+
+## `create_trajectory.m` — Referenztrajektorie per Klick erzeugen (MP4)
+
+**Zweck:** Manuell eine Soll-/Referenztrajektorie auf dem ersten Videoframe
+festlegen, sie auf gleiche Abstände umrechnen und als `.mat` speichern.
+
+**Ablauf:**
+1. MP4 wählen (`uigetfile`), nur den **ersten Frame** lesen (`read(v,1)`, auf
+   RGB gebracht).
+2. `collectTrajectory(firstFrame)` (lokale Funktion): zeigt den Frame, per
+   **Linksklick** wird ein rotes Kreuz gesetzt (beliebig oft), die Punkte
+   werden mit einer Linie verbunden. **"Bestätigen"** (oder Fenster schließen)
+   beendet die Eingabe. Event-gesteuert/flackerfrei (Bild + Marker einmal
+   anlegen, nur `set(XData/YData)`). Rückgabe `pts = [x,y]` in Klick-Reihenfolge.
+3. **Gleiche Abstände, gleiche Punktanzahl:** dichte Spline-Kurve durch die
+   Klicks (`spline`, 2000 Punkte), Bogenlänge `s` (streng monoton via `unique`),
+   dann `nPts` (= Anzahl Klicks) gleichmäßig über `s` verteilte Punkte
+   (`interp1`). Methode angelehnt an die äquidistante Resampling-Logik in
+   `tip_track_matching_spline.m`, aber mit **fester Punktanzahl** statt festem
+   Abstand `d`.
+4. Ergebnis-Plot über dem ersten Frame (Spline + äquidistante Punkte).
+5. Speichern neben dem Video als `<videoname>_trajectory.mat` mit
+   `TipCoordinates` (äquidistant, `[row,col]`) und `clickedPoints`
+   (rohe Klicks, `[x,y]`).
 
 ---
 
