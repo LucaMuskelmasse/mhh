@@ -1,9 +1,8 @@
 % Function (Schritt 4 - automatische Tip-Zuweisung über alle Frames, Ordnerlauf):
 % 1. Einen ORDNER mit mehreren MP4-Videos (V01, V02, ...) auswählen
-% 2. Jedes Video nacheinander mit demselben Algorithmus bearbeiten:
-%    - Zur jeweiligen Video-Datei die passende Trajektorie laden
-%      (<videoname>_trajectory.mat mit TipCoordinates + cochleaCenter,
-%       erzeugt von create_trajectory.m)
+% 2. EINE Trajektorie-Datei (.mat mit TipCoordinates + cochleaCenter, erzeugt
+%    von create_trajectory.m) auswählen - sie gilt für ALLE Videos im Ordner.
+% 3. Jedes Video nacheinander mit demselben Algorithmus bearbeiten:
 %    - Hintergrund-Referenz aus den ersten Frames bilden (Background Subtraction)
 %    - Pro Trajektorienpunkt ein an Tangente/Normale ausgerichtetes Viereck,
 %      dessen Breite/Höhe linear mit dem Abstand zum Mittelpunkt wachsen
@@ -62,6 +61,22 @@ end
 listing = listing(ord);
 numVideos = numel(listing);
 
+%% 2. EINE Trajektorie (.mat) auswählen - gilt für alle Videos
+[matFile, matDir] = uigetfile({'*.mat','MAT-Datei mit Trajektorie (*.mat)'; '*.*','Alle Dateien (*.*)'}, ...
+    'Trajektorie (.mat) auswählen (gilt für alle Videos)', vidDir);
+if isequal(matFile, 0)
+    error('Keine Trajektorie ausgewählt');
+end
+S = load(fullfile(matDir, matFile), 'TipCoordinates', 'cochleaCenter');
+if ~isfield(S, 'TipCoordinates')
+    error('Die .mat enthält keine Variable "TipCoordinates".');
+end
+if ~isfield(S, 'cochleaCenter')
+    error('Die .mat enthält keine Variable "cochleaCenter". Bitte create_trajectory.m erneut ausführen.');
+end
+TipCoordinates = S.TipCoordinates;   % [row, col] = [y, x]  (für alle Videos)
+M = S.cochleaCenter;                 % [x, y] = [col, row]   (für alle Videos)
+
 %% Schleife über alle Videos im Ordner
 for vi = 1:numVideos
     vidFile = listing(vi).name;
@@ -76,22 +91,6 @@ for vi = 1:numVideos
     vLabel = tok;
 
     fprintf('\n=== Video %d/%d: %s (%s) ===\n', vi, numVideos, vidFile, vLabel);
-
-    %% 2. Passende Trajektorie (.mat) zu diesem Video laden
-    trajFile = fullfile(vidDir, [vidName '_trajectory.mat']);
-    if ~isfile(trajFile)
-        warning('[%s] Keine Trajektorie-Datei gefunden: %s  -> Video übersprungen.', ...
-            vLabel, trajFile);
-        continue;
-    end
-    S = load(trajFile, 'TipCoordinates', 'cochleaCenter');
-    if ~isfield(S, 'TipCoordinates') || ~isfield(S, 'cochleaCenter')
-        warning(['[%s] Trajektorie-Datei ohne "TipCoordinates"/"cochleaCenter": %s  ', ...
-            '-> Video übersprungen.'], vLabel, trajFile);
-        continue;
-    end
-    TipCoordinates = S.TipCoordinates;   % [row, col] = [y, x]
-    M = S.cochleaCenter;                 % [x, y] = [col, row]
 
     %% 3. Hintergrund-Referenz aus den ersten Frames mitteln
     v = VideoReader(videoFullPath);
