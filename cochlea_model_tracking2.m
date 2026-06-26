@@ -20,10 +20,10 @@ clear; clc; close all;
 % Grundmaße gelten bei Abstand 0 zum Mittelpunkt; pro Pixel Abstand wachsen
 % Breite und Höhe linear (Steigung). Da jede Ecke EINZELN nach ihrem Abstand
 % zum Mittelpunkt skaliert wird, werden die Boxen zu Trapezen / echten Vierecken.
-rectWidth   = 20;    % Grundbreite (tangential) bei Abstand 0 [px]
-rectHeight  = 10;    % Grundhöhe   (normal)     bei Abstand 0 [px]
-widthSlope  = 0.05;  % Breitenzuwachs je px Abstand zum Mittelpunkt [px/px]
-heightSlope = 0.05;  % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
+rectWidth   = 7;     % Grundbreite (tangential) bei Abstand 0 [px]
+rectHeight  = 0;     % Grundhöhe   (normal)     bei Abstand 0 [px]
+widthSlope  = 0;     % Breitenzuwachs je px Abstand zum Mittelpunkt [px/px]
+heightSlope = 0.5;   % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
 
 % --- Background-Subtraction-Parameter (wie in cochlea_model_tracking.m) ---
 numBgFrames = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hintergrund
