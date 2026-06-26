@@ -70,8 +70,13 @@ fprintf('Punkte: %d   Sehne: min %.2f  max %.2f  std %.4f  (soll = %.2f)\n', ...
 %% 5. Ergebnis anzeigen
 figure('Name', 'Erzeugte Trajektorie', 'NumberTitle', 'off');
 imshow(firstFrame); hold on;
-plot(xDense, yDense, 'b-', 'LineWidth', 1);
-plot(xEqui, yEqui, 'ro', 'MarkerSize', 7, 'MarkerFaceColor', 'r');
+% Rohe Klickpunkte (grau, zum Vergleich)
+plot(xC, yC, 'w+', 'MarkerSize', 10, 'LineWidth', 1.5);
+% Äquidistante Trajektorie: Linie + Kreuze
+plot(xEqui, yEqui, 'r-',  'LineWidth', 2);
+plot(xEqui, yEqui, 'r+', 'MarkerSize', 8, 'LineWidth', 1.5);
+legend({'Klickpunkte (roh)', 'Trajektorie (gleiche Abstände)', ''}, ...
+    'Location', 'best', 'TextColor', 'w', 'Color', [0.2 0.2 0.2]);
 title(sprintf('Trajektorie mit gleichen Abständen (%d Punkte)', nPts));
 hold off;
 
