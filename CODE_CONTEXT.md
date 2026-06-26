@@ -4,13 +4,13 @@ Diese Datei fasst den wichtigen Kontext aller `.m`-Dateien zusammen, damit der
 Konversationsverlauf gelöscht werden kann, ohne Verständnis über den Code zu
 verlieren. Stand: 2026-06-26.
 
-Das Repository enthält zwei thematisch getrennte Bereiche:
+Das Repository enthält die **Bildauswertungs- / Tracking-Skripte**
+(Auswertung der aufgenommenen Bilder bzw. Videos): `kruemung.m`,
+`tip_track_matching_spline.m`, `cochlea_model_tracking.m`.
 
-1. **Versuchssteuerung / Aufnahme** (BFR-Versuch mit Dino-Lite-Kameras und
-   Thermometer): `bfrAufnahmeApp.m`, `listKameras.m`, `testKameras.m`.
-2. **Bildauswertung / Tracking** (Auswertung der aufgenommenen Bilder bzw.
-   Videos): `kruemung.m`, `tip_track_matching_spline.m`,
-   `cochlea_model_tracking.m`.
+(Die Versuchssteuerungs-/Hardware-Skripte `bfrAufnahmeApp.m`, `listKameras.m`
+und `testKameras.m` liegen in einem anderen Branch und sind hier bewusst nicht
+enthalten.)
 
 Kontext: Formgedächtnis-/Memory-CI-Forschung. Es geht um die Verbiegung von
 Draht/Elektroden über Temperatur und um das Tracking der Spitze (Tip) einer
@@ -195,51 +195,6 @@ berechnet.
   Temperatur im Dateinamen).
 - Zuletzt: Ordner-Stapelverarbeitung mehrerer Videos + Referenzpunkte +
   Winkel-Plot ergänzt.
-
----
-
-## Aufnahme-/Hardware-Skripte (separater Bereich, nicht Teil des Trackings)
-
-### `bfrAufnahmeApp.m` — Bedienoberfläche für den BFR-Versuch
-
-**Zweck:** `uifigure`-App, die timer-basiert (nicht blockierend) die
-Temperatur beider Kanäle eines **Omega HH806AWE**-Thermometers ausliest und pro
-Seite ein **Dino-Lite**-Kamerabild aufnimmt, sobald die Temperatur über (bzw.
-beim Abkühlen unter) den letzten Auslösewert steigt (0.1 °C-Schritte).
-
-**Kernkonzepte:**
-- **Deadband (Inner/Outer Band):** Im Feinbereich `IB-Start..IB-End` löst der
-  feine `ibStep` (0.1 °C) aus, außerhalb erst der grobe `obStep` (1.0 °C).
-- **Aufwärmen/Abkühlen:** Umschaltknopf "Abkühlvorgang" dreht die Auslöselogik
-  um (Foto bei fallender Temperatur). Stopp, wenn beide Kanäle die Stopp-
-  Temperatur erreichen (`stopTrun=70` / `stopCrun=37`).
-- **Kameraauswahl:** Dropdown links/rechts/beide; nur gewählte Kameras werden
-  geöffnet und nur deren Bilder ausgelöst.
-- Geteilter Zustand über **nested functions** (gemeinsamer Workspace: `s`,
-  `cams`, `tmr`, Zähler, Parameter `*Run`).
-- Bilder werden mit Temperatur/Inlay-Stempel versehen (`stampImage`,
-  eigener Glyph-Atlas `glyphAtlas`/`renderTextStrip`/`blitLabel`) und in
-  Unterordnern + CSV protokolliert.
-
-**Wichtige (nested) Funktionen:** `onStart`, `onTick` (Messschleife),
-`onCool`, `onStop`, `onClose`, `findThermo`, `attachPreviews`,
-`cleanupResources`. **Lokale Funktionen:** `openDinoLiteCameras` (DNX64-SDK,
-Port-Zuordnung links/rechts), `getHH806Temp`/`decodeMeasurement`/`buildCmd`
-(serielles Protokoll), `captureSingleFrameSide`, `stampImage` & Text-Rendering.
-
-### `listKameras.m` — Diagnose: Videoquellen auflisten
-
-Listet nebeneinander (a) `winvideo`-Geräte (Image Acquisition Toolbox) und
-(b) DNX64-SDK-Geräte mit Port-Pfad auf, um winvideo-Index ↔ USB-Port-Pfad
-(links/rechts) korrekt zuzuordnen. Hilfsfunktion `extractPortKey` parst den
-Port-Schlüssel aus der IDA-Zeichenkette. Ergebnis dient der CONFIG in
-`bfrAufnahmeApp` (`openDinoLiteCameras`).
-
-### `testKameras.m` — Minimaltest ohne App
-
-Prüft, ob die beiden Dino-Lites einzeln und gemeinsam ein Live-Bild liefern
-(Eingrenzung "rotes Kreuz": Code vs. Gerät/USB-Bandbreite). Öffnet nacheinander
-`videoinput('winvideo',1)` und `...,2)` mit `preview` und Bestätigungsdialogen.
 
 ---
 
