@@ -1,16 +1,20 @@
-% Function (Schritt 2 - automatische Tip-Zuweisung):
-% 1. Eine .mat mit der zuvor festgelegten Trajektorie öffnen (TipCoordinates)
+% Function (Schritt 3 - automatische Tip-Zuweisung über alle Frames):
+% 1. Eine .mat mit der Trajektorie + Mittelpunkt öffnen (TipCoordinates, cochleaCenter)
 % 2. Ein MP4-Video öffnen
 % 3. Hintergrund-Referenz aus den ersten Frames bilden (Background Subtraction)
-% 4. Frame 300 per Background Subtraction segmentieren und anzeigen
-% 5. Mittelpunkt aus der .mat laden; Trajektorie als rote Kreuze einzeichnen;
-%    um jedes Kreuz ein rotes, an Tangente/Normale ausgerichtetes Viereck,
-%    dessen Breite und Höhe linear mit dem Abstand zum Mittelpunkt wachsen
-%    (jede Ecke einzeln skaliert -> Trapeze / echte Vierecke).
-% 6. Trapeze als Suchflächen: vom mittelpunktsnächsten Endpunkt der Trajektorie
-%    Richtung Anfang durchgehen. Im ersten Trapez, in dem schwarze Pixel
-%    (Vordergrund/Elektrode) auftauchen, den Schwerpunkt der GRÖSSTEN schwarzen
-%    Fläche bestimmen und mit einem grünen Kreuz markieren.
+% 4. Mittelpunkt aus der .mat laden; pro Trajektorienpunkt ein an Tangente/Normale
+%    ausgerichtetes Viereck, dessen Breite/Höhe linear mit dem Abstand zum
+%    Mittelpunkt wachsen (jede Ecke einzeln skaliert -> Trapeze). Diese Trapeze
+%    sind statisch und werden EINMAL als Suchmasken vorberechnet.
+% 5. ALLE Frames chronologisch ab Frame 1 durchgehen. Pro Frame:
+%    - Background Subtraction
+%    - Trapeze als Suchflächen vom mittelpunktsnächsten Endpunkt Richtung Anfang
+%      durchgehen; im ersten Trapez mit schwarzen Pixeln (Elektrode) den
+%      Schwerpunkt der GRÖSSTEN schwarzen Fläche als Tip (grünes Kreuz) nehmen.
+%    - Findet kein Trapez schwarze Pixel, wird der Tip auf das rote Kreuz des
+%      ZULETZT durchsuchten Trajektorienpunkts gesetzt.
+% 6. Nach allen Frames die Tip-Trajektorie (grüne Kreuze) wie in
+%    cochlea_model_tracking.m als eigene Figure anzeigen.
 %
 % Es gibt KEINE Tip-Zuweisung per Suchradius und KEINE manuelle Korrektur mehr
 % (gegenüber cochlea_model_tracking.m bewusst entfernt). Background Subtraction
@@ -34,8 +38,8 @@ numBgFrames = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hinterg
 fgThreshold = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
 minBlobSize = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
 
-% --- Anzuzeigender / auszuwertender Frame ---
-trackFrame  = 300;   % Frame, der segmentiert und durchsucht wird
+% --- Live-Vorschau während des Durchlaufs ---
+showPreview = true;  % true = aktuellen Frame + Tip beim Durchlauf anzeigen
 
 defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Flex_EA';
 
@@ -78,24 +82,7 @@ for b = 1:nbg
 end
 bgGray = medfilt2(bgAccum / nbg, [3 3]);   % statischer Hintergrund
 
-%% 4. Frame 300 per Background Subtraction segmentieren
-frameIdx = min(max(round(trackFrame), 1), totalFrames);  % Sicherung gegen kurze Videos
-imgFrame = read(v, frameIdx);
-if size(imgFrame,3) == 1
-    imgFrame = repmat(imgFrame, [1 1 3]);
-end
-rgbFiltered = imgFrame;
-for ch = 1:3
-    rgbFiltered(:,:,ch) = medfilt2(imgFrame(:,:,ch), [3 3]);
-end
-
-grayImg = double(rgb2gray(rgbFiltered));
-diffImg = abs(grayImg - bgGray) / 255;     % normierte Differenz 0..1
-fg = diffImg > fgThreshold;                % Vordergrund (Elektrode) = true
-fg = bwareaopen(fg, minBlobSize);          % kleine Störpixel entfernen
-bwFrame = ~fg;                             % Elektrode = 0 (schwarz), Hintergrund = 1 (weiß)
-
-%% 5. Trajektorie + abstandsabhängige Vierecke anzeigen
+%% 4. Trapeze (statisch) als Suchmasken vorberechnen
 xs = TipCoordinates(:,2);   % x = Spalte
 ys = TipCoordinates(:,1);   % y = Zeile
 
@@ -110,20 +97,13 @@ ty = ty ./ tlen;
 nx = -ty;
 ny =  tx;
 
-% --- Frame zeigen; Mittelpunkt aus .mat ---
-figure('Name', sprintf('Vierecke (Frame %d)', frameIdx), 'NumberTitle', 'off');
-imshow(bwFrame); hold on;
-plot(M(1), M(2), 'cx', 'MarkerSize', 16, 'LineWidth', 2);   % Mittelpunkt (cyan, aus .mat)
-
-% --- Trajektorie als rote Kreuze ---
-plot(xs, ys, 'r+', 'MarkerSize', 10, 'LineWidth', 1.5);
-
-% --- Pro Punkt ein Viereck; jede Ecke einzeln nach Abstand zum Mittelpunkt skaliert ---
 % Vorzeichen-Kombinationen der vier Ecken (entlang Tangente / Normale)
 signs = [ +1 +1;  +1 -1;  -1 -1;  -1 +1 ];
 
+H = v.Height;  W = v.Width;
 nP = numel(xs);
 allCorners = cell(nP, 1);   % je Punkt die 5x2-Eckpunkte (geschlossenes Polygon)
+allMasks   = cell(nP, 1);   % je Punkt die Trapez-Maske (logisch, HxW)
 for i = 1:nP
     P = [xs(i), ys(i)];
     T = [tx(i), ty(i)];   % Einheits-Tangente
@@ -146,46 +126,113 @@ for i = 1:nP
     end
     corners(5,:) = corners(1,:);   % Polygon schließen
     allCorners{i} = corners;
-
-    plot(corners(:,1), corners(:,2), 'r-', 'LineWidth', 1.5);
+    allMasks{i}   = poly2mask(corners(:,1), corners(:,2), H, W);
 end
 
-%% 6. Trapeze als Suchflächen: Tip automatisch finden
-% Durchlaufreihenfolge: an dem Endpunkt der Trajektorie beginnen, der dem
+% Durchlaufreihenfolge der Suche: am Endpunkt der Trajektorie beginnen, der dem
 % Mittelpunkt M am nächsten liegt, und Richtung anderes Ende durchgehen.
 dFirst = hypot(xs(1)   - M(1), ys(1)   - M(2));
 dLast  = hypot(xs(end) - M(1), ys(end) - M(2));
 if dLast <= dFirst
-    order = nP:-1:1;   % letzter Punkt ist näher an M -> von hinten nach vorne
+    searchOrder = nP:-1:1;   % letzter Punkt ist näher an M -> von hinten nach vorne
 else
-    order = 1:nP;      % erster Punkt ist näher an M -> von vorne nach hinten
+    searchOrder = 1:nP;      % erster Punkt ist näher an M -> von vorne nach hinten
+end
+idxLast = searchOrder(end);  % zuletzt durchsuchter Trajektorienpunkt (Fallback-Tip)
+
+%% 5. Alle Frames chronologisch durchgehen und Tip pro Frame bestimmen
+TipCoordinates2 = zeros(totalFrames, 2);   % [row, col] je Frame (grüne Kreuze)
+
+% --- optionale Live-Vorschau: einmal anlegen, danach nur aktualisieren ---
+if showPreview
+    hFig = figure('Name', 'Automatisches Tip-Tracking', 'NumberTitle', 'off');
+    hAx  = axes('Parent', hFig);
+    hImg = imshow(false(H, W), 'Parent', hAx);
+    hold(hAx, 'on');
+    plot(hAx, M(1), M(2), 'cx', 'MarkerSize', 16, 'LineWidth', 2);  % Mittelpunkt
+    plot(hAx, xs, ys, 'r+', 'MarkerSize', 8, 'LineWidth', 1.2);     % Trajektorie
+    for i = 1:nP
+        c = allCorners{i};
+        plot(hAx, c(:,1), c(:,2), 'r-', 'LineWidth', 0.8);          % Trapeze
+    end
+    hBox   = plot(hAx, NaN, NaN, 'g-', 'LineWidth', 2);             % gefundenes Trapez
+    hTip   = plot(hAx, NaN, NaN, 'gx', 'MarkerSize', 16, 'LineWidth', 2.5);
+    hTitle = title(hAx, '');
+    hold(hAx, 'off');
 end
 
-% Schwarze Pixel im Bild = Vordergrund (Elektrode) = fg == true
-tipFound = false;
-tipXY    = [NaN NaN];
-for i = order
-    poly = allCorners{i};
-    mask = poly2mask(poly(:,1), poly(:,2), v.Height, v.Width);  % Trapez als Maske
-    blackInside = fg & mask;                 % schwarze Pixel innerhalb des Trapezes
-    if any(blackInside(:))
-        cc = bwconncomp(blackInside);
-        rp = regionprops(cc, 'Area', 'Centroid');
-        [~, k] = max([rp.Area]);             % größte zusammenhängende schwarze Fläche
-        tipXY = rp(k).Centroid;              % [x, y] = [col, row]
-        % gefundenes Trapez hervorheben + Schwerpunkt als grünes Kreuz
-        plot(poly(:,1), poly(:,2), 'g-', 'LineWidth', 2);
-        plot(tipXY(1), tipXY(2), 'gx', 'MarkerSize', 16, 'LineWidth', 2.5);
-        tipFound = true;
-        break;
+for fIdx = 1:totalFrames
+    img = read(v, fIdx);
+    if size(img,3) == 1
+        img = repmat(img, [1 1 3]);
+    end
+    rgbFiltered = img;
+    for ch = 1:3
+        rgbFiltered(:,:,ch) = medfilt2(img(:,:,ch), [3 3]);
+    end
+    grayImg = double(rgb2gray(rgbFiltered));
+    diffImg = abs(grayImg - bgGray) / 255;     % normierte Differenz 0..1
+    fg = diffImg > fgThreshold;                % Vordergrund (Elektrode) = true
+    fg = bwareaopen(fg, minBlobSize);          % kleine Störpixel entfernen
+    bwFrame = ~fg;                             % Elektrode = 0 (schwarz), Hintergrund = 1
+
+    % --- Trapeze als Suchflächen durchgehen ---
+    tipFound = false;
+    foundIdx = idxLast;
+    tipXY    = [NaN NaN];
+    for i = searchOrder
+        blackInside = fg & allMasks{i};        % schwarze Pixel im Trapez
+        if any(blackInside(:))
+            cc = bwconncomp(blackInside);
+            rp = regionprops(cc, 'Area', 'Centroid');
+            [~, k] = max([rp.Area]);           % größte zusammenhängende schwarze Fläche
+            tipXY    = rp(k).Centroid;         % [x, y] = [col, row]
+            foundIdx = i;
+            tipFound = true;
+            break;
+        end
+    end
+
+    if ~tipFound
+        % Kein Trapez mit schwarzen Pixeln -> Tip auf das rote Kreuz des
+        % zuletzt durchsuchten Trajektorienpunkts setzen.
+        tipXY = [xs(idxLast), ys(idxLast)];    % [x, y] = [col, row]
+    end
+
+    TipCoordinates2(fIdx, :) = [tipXY(2), tipXY(1)];   % [row, col]
+
+    % --- Live-Vorschau aktualisieren ---
+    if showPreview && isvalid(hFig)
+        set(hImg, 'CData', bwFrame);
+        bc = allCorners{foundIdx};
+        set(hBox, 'XData', bc(:,1), 'YData', bc(:,2));
+        set(hTip, 'XData', tipXY(1), 'YData', tipXY(2));
+        if tipFound
+            set(hTitle, 'String', sprintf('Frame %d / %d  -  Tip (x=%.1f, y=%.1f)', ...
+                fIdx, totalFrames, tipXY(1), tipXY(2)));
+        else
+            set(hTitle, 'String', sprintf(['Frame %d / %d  -  kein Trapez gefunden, ', ...
+                'Tip auf letztes Trajektorienkreuz'], fIdx, totalFrames));
+        end
+        drawnow limitrate;
     end
 end
 
-if tipFound
-    title(sprintf(['Frame %d - Tip gefunden bei (x=%.1f, y=%.1f)  ', ...
-        '(Schwerpunkt der größten schwarzen Fläche)'], frameIdx, tipXY(1), tipXY(2)));
-else
-    title(sprintf('Frame %d - kein Trapez mit schwarzen Pixeln gefunden', frameIdx));
-    warning('In keinem Trapez wurden schwarze Pixel gefunden.');
-end
+%% 6. Tip-Trajektorie (grüne Kreuze) anzeigen (wie in cochlea_model_tracking.m)
+figure('Name', 'Tip Trajectory (automatisch)', 'NumberTitle', 'off');
+hold on;
+axis([1 W 1 H]);
+axis ij;                       % Bildkoordinaten (Zeile = y nach unten)
+grid on;
+title(sprintf('Automatische Tip-Trajektorie (%d Frames)', totalFrames));
+xlabel('Column (x)');
+ylabel('Row (y)');
+
+% grüne Kreuze (Tips pro Frame) + verbindende Linie
+plot(TipCoordinates2(:,2), TipCoordinates2(:,1), 'gx', 'MarkerSize', 8, 'LineWidth', 1.5);
+plot(TipCoordinates2(:,2), TipCoordinates2(:,1), 'g-', 'LineWidth', 1.0);
+
+% Mittelpunkt zur Orientierung
+plot(M(1), M(2), 'cx', 'MarkerSize', 15, 'LineWidth', 2);
+legend({'Tip (grüne Kreuze)', 'Tip-Linie', 'Mittelpunkt'}, 'Location', 'best');
 hold off;
