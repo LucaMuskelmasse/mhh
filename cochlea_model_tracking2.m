@@ -1,8 +1,12 @@
-% Function (Schritt 4 - automatische Tip-Zuweisung über alle Frames, Ordnerlauf):
-% 1. Einen ORDNER mit mehreren MP4-Videos (V01, V02, ...) auswählen
+% Function (Schritt 5 - automatische Tip-Zuweisung über alle Frames, Ordnerlauf):
+% 1. Einen ORDNER mit MP4-Videos auswählen. Verarbeitet werden nur die
+%    *_Camera1.mp4 (V01, V02, ...); *_Camera2.mp4 werden ignoriert.
 % 2. EINE Trajektorie-Datei (.mat mit TipCoordinates + cochleaCenter, erzeugt
 %    von create_trajectory.m) auswählen - sie gilt für ALLE Videos im Ordner.
 % 3. Jedes Video nacheinander mit demselben Algorithmus bearbeiten:
+%    - Passende Messdaten-CSV laden (<...>_F1.csv, deutsches Format: ; und ,),
+%      mit TimeStamp (Spalte U) und Kraft in z-Richtung (Spalte C). Eine Zeile
+%      pro Frame (1:1).
 %    - Hintergrund-Referenz aus den ersten Frames bilden (Background Subtraction)
 %    - Pro Trajektorienpunkt ein an Tangente/Normale ausgerichtetes Viereck,
 %      dessen Breite/Höhe linear mit dem Abstand zum Mittelpunkt wachsen
@@ -14,10 +18,10 @@
 %          den Schwerpunkt der GRÖSSTEN schwarzen Fläche als Tip (grünes Kreuz).
 %        * Findet kein Trapez schwarze Pixel, wird der Tip auf das rote Kreuz des
 %          ZULETZT durchsuchten Trajektorienpunkts gesetzt.
-%    - Tip-Trajektorie (grüne Kreuze) und Winkel über Frame anzeigen.
-% 3. In jedem Figure-Titel steht zusätzlich, welches V0x bearbeitet wird.
-% 4. Nach jedem Video wird auf Bestätigung gewartet; die Trajektorie- und
-%    Winkel-Plots bleiben offen.
+%    - Tip-Trajektorie (grüne Kreuze), Winkel über TimeStamp und Winkel über
+%      Kraft z anzeigen.
+% 4. In jedem Figure-Titel steht zusätzlich, welches V0x bearbeitet wird. Die
+%    Plots bleiben offen; die Videos laufen automatisch nacheinander durch.
 %
 % Es gibt KEINE Tip-Zuweisung per Suchradius und KEINE manuelle Korrektur mehr
 % (gegenüber cochlea_model_tracking.m bewusst entfernt). Background Subtraction
@@ -52,10 +56,11 @@ if isequal(vidDir, 0)
     error('Kein Ordner ausgewählt');
 end
 
-% Alle .mp4 im Ordner, alphabetisch sortiert (-> V01, V02, ... bei fester Benennung)
-listing = dir(fullfile(vidDir, '*.mp4'));
+% Nur die Camera1-Videos, alphabetisch sortiert (-> V01, V02, ...).
+% Camera2-Videos (*_Camera2.mp4) werden bewusst ignoriert.
+listing = dir(fullfile(vidDir, '*_Camera1.mp4'));
 if isempty(listing)
-    error('Keine .mp4-Dateien im Ordner gefunden: %s', vidDir);
+    error('Keine *_Camera1.mp4-Dateien im Ordner gefunden: %s', vidDir);
 end
 [~, ord] = sort({listing.name});
 listing = listing(ord);
@@ -91,6 +96,34 @@ for vi = 1:numVideos
     vLabel = tok;
 
     fprintf('\n=== Video %d/%d: %s (%s) ===\n', vi, numVideos, vidFile, vLabel);
+
+    %% 2b. Passende Messdaten-CSV laden (TimeStamp Spalte U, Kraft z Spalte C)
+    % Dateiname des Videos ohne "_Camera1" -> CSV-Name (z.B. ..._F1.csv).
+    % Deutsches Format: ';' als Trennzeichen, ',' als Dezimalzeichen, 1 Kopfzeile.
+    % 1:1-Zuordnung: CSV-Zeile k gehört zu Frame k.
+    csvBase = regexprep(vidName, '_Camera1$', '');
+    csvFile = fullfile(vidDir, [csvBase '.csv']);
+    csvTime  = [];   % Spalte U
+    csvForce = [];   % Spalte C
+    if isfile(csvFile)
+        txt  = fileread(csvFile);
+        txt  = strrep(txt, ',', '.');                    % Dezimalkomma -> Dezimalpunkt
+        rows = regexp(txt, '\r\n|\r|\n', 'split');       % in Zeilen zerlegen
+        rows = rows(~cellfun('isempty', rows));          % Leerzeilen entfernen
+        if numel(rows) >= 2
+            rows = rows(2:end);                          % Kopfzeile überspringen
+            nCsv = numel(rows);
+            csvTime  = nan(nCsv, 1);
+            csvForce = nan(nCsv, 1);
+            for r = 1:nCsv
+                fld = strsplit(rows{r}, ';', 'CollapseDelimiters', false);
+                if numel(fld) >= 21, csvTime(r)  = str2double(fld{21}); end  % Spalte U
+                if numel(fld) >=  3, csvForce(r) = str2double(fld{3});  end  % Spalte C
+            end
+        end
+    else
+        warning('[%s] Keine CSV gefunden: %s -> Winkel ersatzweise über Frame.', vLabel, csvFile);
+    end
 
     %% 3. Hintergrund-Referenz aus den ersten Frames mitteln
     v = VideoReader(videoFullPath);
@@ -296,21 +329,49 @@ for vi = 1:numVideos
         angleUnwrapped = nan(nImg, 1);
         angleUnwrapped(valid) = rad2deg(unwrap(deg2rad(angleDeg(valid))));
 
-        figure('Name', ['Winkel ' vLabel], 'NumberTitle', 'off');
-        plot(find(valid), angleUnwrapped(valid), 'b.-', 'LineWidth', 1.5, 'MarkerSize', 12);
+        % --- Pro Frame TimeStamp + Kraft z aus der CSV (1:1: Zeile k = Frame k) ---
+        tsFrame = nan(nImg, 1);   % TimeStamp (Spalte U) je Frame
+        fzFrame = nan(nImg, 1);   % Kraft z   (Spalte C) je Frame
+        haveCSV = ~isempty(csvTime);
+        if haveCSV
+            m = min(nImg, numel(csvTime));
+            tsFrame(1:m) = csvTime(1:m);
+            fzFrame(1:m) = csvForce(1:m);
+            if numel(csvTime) ~= nImg
+                warning('[%s] CSV-Zeilen (%d) != Frames (%d); es wird bis %d zugeordnet.', ...
+                    vLabel, numel(csvTime), nImg, m);
+            end
+        end
+
+        % --- Winkel über TimeStamp (Spalte U) ---
+        if haveCSV
+            vT = valid & ~isnan(tsFrame);
+            xT = tsFrame(vT);     xlabT = 'TimeStamp (Spalte U)';
+        else
+            vT = valid;
+            xT = find(vT);        xlabT = 'Frame (keine CSV)';
+        end
+        figure('Name', ['Winkel über TimeStamp ' vLabel], 'NumberTitle', 'off');
+        plot(xT, angleUnwrapped(vT), 'b.-', 'LineWidth', 1.5, 'MarkerSize', 12);
         grid on;
-        xlabel('Frame');
+        xlabel(xlabT);
         ylabel('Winkel [°]');
-        title(sprintf('Winkel Referenz-/Tip-Linie (gegen Uhrzeigersinn positiv) (%s)', vLabel));
+        title(sprintf('Winkel über TimeStamp (gegen Uhrzeigersinn positiv) (%s)', vLabel));
+
+        % --- Winkel über Kraft in z-Richtung (Spalte C) ---
+        if haveCSV
+            vF = valid & ~isnan(fzFrame);
+            figure('Name', ['Winkel über Kraft z ' vLabel], 'NumberTitle', 'off');
+            plot(fzFrame(vF), angleUnwrapped(vF), 'b.-', 'LineWidth', 1.0, 'MarkerSize', 12);
+            grid on;
+            xlabel('Kraft z-Richtung (Spalte C)');
+            ylabel('Winkel [°]');
+            title(sprintf('Winkel über Kraft z (%s)', vLabel));
+        end
     end
 
-    %% Auf Bestätigung warten, bevor das nächste Video geöffnet wird
-    % (alle Plots bleiben offen)
-    if vi < numVideos
-        uiwait(msgbox(sprintf(['Video %s (%d/%d) fertig.\n', ...
-            'OK -> nächstes Video öffnen. Alle Plots bleiben offen.'], ...
-            vLabel, vi, numVideos), 'Weiter zum nächsten Video', 'modal'));
-    else
+    % Plots bleiben offen; automatisch weiter zum nächsten Video
+    if vi == numVideos
         fprintf('\nAlle %d Videos verarbeitet.\n', numVideos);
     end
 end
