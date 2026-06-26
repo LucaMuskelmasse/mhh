@@ -172,7 +172,7 @@ for vi = 1:numVideos
     if showPreview
         hFig = figure('Name', ['Tip-Tracking ' vLabel], 'NumberTitle', 'off');
         hAx  = axes('Parent', hFig);
-        hImg = imshow(false(H, W), 'Parent', hAx);
+        hImg = imshow(zeros(H, W, 3, 'uint8'), 'Parent', hAx);
         hold(hAx, 'on');
         plot(hAx, M(1), M(2), 'cx', 'MarkerSize', 16, 'LineWidth', 2);  % Mittelpunkt
         plot(hAx, xs, ys, 'r+', 'MarkerSize', 8, 'LineWidth', 1.2);     % Trajektorie
@@ -228,7 +228,7 @@ for vi = 1:numVideos
 
         % --- Live-Vorschau aktualisieren ---
         if showPreview && isvalid(hFig)
-            set(hImg, 'CData', bwFrame);
+            set(hImg, 'CData', rgbFiltered);
             bc = allCorners{foundIdx};
             set(hBox, 'XData', bc(:,1), 'YData', bc(:,2));
             set(hTip, 'XData', tipXY(1), 'YData', tipXY(2));
