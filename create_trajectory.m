@@ -1,12 +1,13 @@
 % Function:
 % 1. Select an MP4 video file (with default path)
-% 2. Show only the FIRST frame of the video
-% 3. Place a red cross per left-click; repeat as often as wanted
-% 4. Press the confirmation button to close the window
-% 5. Resample the clicked trajectory to EQUAL spacing (same dense-spline
+% 2. Show only the LAST frame of the video
+% 3. Click the cochlea center point (1 click, saved as cochleaCenter [x,y])
+% 4. Place a red cross per left-click for the trajectory; repeat as wanted
+% 5. Press the confirmation button to close the window
+% 6. Resample the clicked trajectory to EQUAL spacing (same dense-spline
 %    approach as in tip_track_matching_spline.m), keeping the same NUMBER of
 %    points as clicks
-% 6. Save the trajectory into a .mat file next to the video
+% 7. Save trajectory, raw clicks, and cochlea center into a .mat file
 
 clear; clc; close all;
 
@@ -27,7 +28,19 @@ if size(firstFrame, 3) == 1
     firstFrame = repmat(firstFrame, [1 1 3]);   % auf RGB bringen
 end
 
-%% 3. Punkte per Linksklick setzen (rote Kreuze), Bestätigen schließt das Fenster
+%% 3. Mittelpunkt des Cochleamodells anklicken (1 Klick)
+hFigM = figure('Name', 'Mittelpunkt wählen', 'NumberTitle', 'off');
+imshow(firstFrame);
+title('Mittelpunkt des Cochleamodells anklicken (1 Linksklick)');
+[xM, yM] = ginput(1);
+cochleaCenter = [xM, yM];   % [x, y] = [col, row]
+hold on;
+plot(xM, yM, 'cx', 'MarkerSize', 16, 'LineWidth', 2);
+title(sprintf('Mittelpunkt gesetzt: (%.0f, %.0f)  -  Fenster wird geschlossen ...', xM, yM));
+pause(0.8);
+close(hFigM);
+
+%% 4. Punkte per Linksklick setzen (rote Kreuze), Bestätigen schließt das Fenster
 clickedPoints = collectTrajectory(firstFrame);   % [x, y] = [col, row], in Klick-Reihenfolge
 
 nPts = size(clickedPoints, 1);
@@ -35,7 +48,7 @@ if nPts < 2
     error('Mindestens zwei Punkte nötig, um eine Trajektorie zu erzeugen.');
 end
 
-%% 4. Trajektorie auf gleiche Abstände umrechnen (gleiche Punktanzahl wie Klicks)
+%% 5. Trajektorie auf gleiche Abstände umrechnen (gleiche Punktanzahl wie Klicks)
 % Vorgehen wie in tip_track_matching_spline.m: dichte Spline-Kurve durch die
 % Klickpunkte, danach entlang der Bogenlänge gleichmäßig abtasten. Die Anzahl
 % der Stützstellen wird aus der Anzahl der gesetzten Punkte übernommen.
@@ -67,23 +80,26 @@ dChord = hypot(diff(xEqui), diff(yEqui));
 fprintf('Punkte: %d   Sehne: min %.2f  max %.2f  std %.4f  (soll = %.2f)\n', ...
         nPts, min(dChord), max(dChord), std(dChord), s(end)/(nPts-1));
 
-%% 5. Ergebnis anzeigen
+%% 6. Ergebnis anzeigen
 figure('Name', 'Erzeugte Trajektorie', 'NumberTitle', 'off');
 imshow(firstFrame); hold on;
-% Rohe Klickpunkte (grau, zum Vergleich)
+% Mittelpunkt (cyan)
+plot(cochleaCenter(1), cochleaCenter(2), 'cx', 'MarkerSize', 16, 'LineWidth', 2);
+% Rohe Klickpunkte (weiß, zum Vergleich)
 plot(xC, yC, 'w+', 'MarkerSize', 10, 'LineWidth', 1.5);
 % Äquidistante Trajektorie: Linie + Kreuze
 plot(xEqui, yEqui, 'r-',  'LineWidth', 2);
 plot(xEqui, yEqui, 'r+', 'MarkerSize', 8, 'LineWidth', 1.5);
-legend({'Klickpunkte (roh)', 'Trajektorie (gleiche Abstände)', ''}, ...
+legend({'Mittelpunkt', 'Klickpunkte (roh)', 'Trajektorie (gleiche Abstände)', ''}, ...
     'Location', 'best', 'TextColor', 'w', 'Color', [0.2 0.2 0.2]);
 title(sprintf('Trajektorie mit gleichen Abständen (%d Punkte)', nPts));
 hold off;
 
-%% 6. Trajektorie speichern (neben dem Video)
+%% 7. Trajektorie und Mittelpunkt speichern (neben dem Video)
 matFile = fullfile(vidDir, [vidName '_trajectory.mat']);
-save(matFile, 'TipCoordinates', 'clickedPoints');
-fprintf('Trajektorie gespeichert: %s\n', matFile);
+save(matFile, 'TipCoordinates', 'clickedPoints', 'cochleaCenter');
+fprintf('Gespeichert: %s\n', matFile);
+fprintf('  Mittelpunkt: x=%.1f  y=%.1f\n', cochleaCenter(1), cochleaCenter(2));
 
 
 %% Lokale Funktion: Punkte per Linksklick sammeln

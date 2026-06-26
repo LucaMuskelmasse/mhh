@@ -3,7 +3,7 @@
 % 2. Ein MP4-Video öffnen
 % 3. Hintergrund-Referenz aus den ersten Frames bilden (Background Subtraction)
 % 4. Frame 300 per Background Subtraction segmentieren und anzeigen
-% 5. Mittelpunkt per Klick wählen; Trajektorie als rote Kreuze einzeichnen;
+% 5. Mittelpunkt aus der .mat laden; Trajektorie als rote Kreuze einzeichnen;
 %    um jedes Kreuz ein rotes, an Tangente/Normale ausgerichtetes Viereck,
 %    dessen Breite und Höhe linear mit dem Abstand zum Mittelpunkt wachsen
 %    (jede Ecke einzeln skaliert -> Trapeze / echte Vierecke).
@@ -45,11 +45,15 @@ defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Flex_EA';
 if isequal(matFile, 0)
     error('Keine Trajektorie ausgewählt');
 end
-S = load(fullfile(matDir, matFile), 'TipCoordinates');
+S = load(fullfile(matDir, matFile), 'TipCoordinates', 'cochleaCenter');
 if ~isfield(S, 'TipCoordinates')
     error('Die .mat enthält keine Variable "TipCoordinates".');
 end
+if ~isfield(S, 'cochleaCenter')
+    error('Die .mat enthält keine Variable "cochleaCenter". Bitte create_trajectory.m erneut ausführen.');
+end
 TipCoordinates = S.TipCoordinates;   % [row, col] = [y, x]
+M = S.cochleaCenter;                 % [x, y] = [col, row]
 
 %% 2. MP4-Video öffnen
 [vidFile, vidDir] = uigetfile({'*.mp4','MP4 Video (*.mp4)'; '*.*','Alle Dateien (*.*)'}, ...
@@ -91,7 +95,7 @@ fg = diffImg > fgThreshold;                % Vordergrund (Elektrode) = true
 fg = bwareaopen(fg, minBlobSize);          % kleine Störpixel entfernen
 bwFrame = ~fg;                             % Elektrode = 0 (schwarz), Hintergrund = 1 (weiß)
 
-%% 5. Mittelpunkt wählen, dann Trajektorie + abstandsabhängige Vierecke anzeigen
+%% 5. Trajektorie + abstandsabhängige Vierecke anzeigen
 xs = TipCoordinates(:,2);   % x = Spalte
 ys = TipCoordinates(:,1);   % y = Zeile
 
@@ -106,13 +110,10 @@ ty = ty ./ tlen;
 nx = -ty;
 ny =  tx;
 
-% --- Frame zeigen und Mittelpunkt anklicken (vor der Trajektorie) ---
+% --- Frame zeigen; Mittelpunkt aus .mat ---
 figure('Name', sprintf('Vierecke (Frame %d)', frameIdx), 'NumberTitle', 'off');
 imshow(bwFrame); hold on;
-title('Mittelpunkt anklicken (Viereckgröße wächst mit Abstand dazu)');
-[xM, yM] = ginput(1);
-M = [xM, yM];
-plot(xM, yM, 'cx', 'MarkerSize', 16, 'LineWidth', 2);   % Mittelpunkt (cyan)
+plot(M(1), M(2), 'cx', 'MarkerSize', 16, 'LineWidth', 2);   % Mittelpunkt (cyan, aus .mat)
 
 % --- Trajektorie als rote Kreuze ---
 plot(xs, ys, 'r+', 'MarkerSize', 10, 'LineWidth', 1.5);
