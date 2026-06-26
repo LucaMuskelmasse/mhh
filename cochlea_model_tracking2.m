@@ -49,6 +49,9 @@ minBlobSize = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden ent
 % --- Live-Vorschau während des Durchlaufs ---
 showPreview = true;  % true = aktuellen Frame + Tip beim Durchlauf anzeigen
 
+% --- Glättungsparameter für Winkel-über-TimeStamp-Plot ---
+smoothSpan = 15;     % Breite des gleitenden Mittelwerts (Frames); ungerade empfohlen
+
 defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
 
 %% 1. ORDNER mit MP4-Videos auswählen
@@ -370,15 +373,35 @@ for vi = 1:numVideos
         ylabel('Winkel [°]');
         title(sprintf('Winkel über TimeStamp (gegen Uhrzeigersinn positiv) (%s)', vLabel));
 
-        % --- Winkel über Kraft in z-Richtung (Spalte C) ---
+        % --- Geglätteter Winkel über TimeStamp ---
+        if haveCSV
+            vT = valid & ~isnan(tsFrame);
+            angleSmooth = angleUnwrapped;
+            angleSmooth(vT) = smooth(angleUnwrapped(vT), smoothSpan);
+            figure('Name', ['Winkel (geglättet) über TimeStamp ' vLabel], 'NumberTitle', 'off');
+            hold on;
+            plot(tsFrame(vT), angleUnwrapped(vT), 'Color', [0.7 0.7 0.7], ...
+                'LineStyle', '-', 'Marker', '.', 'MarkerSize', 8, 'LineWidth', 0.8, ...
+                'DisplayName', 'Roh');
+            plot(tsFrame(vT), angleSmooth(vT), 'b-', 'LineWidth', 2.0, ...
+                'DisplayName', sprintf('Geglättet (span=%d)', smoothSpan));
+            hold off;
+            grid on;
+            xlabel(xlabT);
+            ylabel('Winkel [°]');
+            title(sprintf('Winkel (geglättet) über TimeStamp (%s)', vLabel));
+            legend('Location', 'best');
+        end
+
+        % --- Kraft z abhängig vom Winkel (Spalte C) ---
         if haveCSV
             vF = valid & ~isnan(fzFrame);
-            figure('Name', ['Winkel über Kraft z ' vLabel], 'NumberTitle', 'off');
-            plot(fzFrame(vF), angleUnwrapped(vF), 'b.-', 'LineWidth', 1.0, 'MarkerSize', 12);
+            figure('Name', ['Kraft z über Winkel ' vLabel], 'NumberTitle', 'off');
+            plot(angleUnwrapped(vF), fzFrame(vF), 'b.-', 'LineWidth', 1.0, 'MarkerSize', 12);
             grid on;
-            xlabel('Kraft z-Richtung (Spalte C)');
-            ylabel('Winkel [°]');
-            title(sprintf('Winkel über Kraft z (%s)', vLabel));
+            xlabel('Winkel [°]');
+            ylabel('Kraft z-Richtung (Spalte C)');
+            title(sprintf('Kraft z über Winkel (%s)', vLabel));
         end
     end
 
