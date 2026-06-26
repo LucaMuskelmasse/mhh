@@ -406,14 +406,36 @@ for vi = 1:numVideos
             title(sprintf('Kraft z über Winkel (%s)', vLabel));
         end
 
+        % --- Geglättete Kraft z abhängig vom Winkel ---
+        if haveCSV
+            vF = valid & ~isnan(fzFrame);
+            forceSmooth = nan(nImg, 1);
+            forceSmooth(vF) = smooth(fzFrame(vF), smoothSpan);
+            figure('Name', ['Kraft z (geglättet) über Winkel ' vLabel], 'NumberTitle', 'off');
+            hold on;
+            plot(angleUnwrapped(vF), fzFrame(vF), 'Color', [0.7 0.7 0.7], ...
+                'LineStyle', '-', 'Marker', '.', 'MarkerSize', 8, 'LineWidth', 0.8, ...
+                'DisplayName', 'Roh');
+            plot(angleUnwrapped(vF), forceSmooth(vF), 'r-', 'LineWidth', 2.0, ...
+                'DisplayName', sprintf('Geglättet (span=%d)', smoothSpan));
+            hold off;
+            grid on;
+            xlabel('Winkel [°]');
+            ylabel('Kraft z-Richtung (Spalte C)');
+            title(sprintf('Kraft z (geglättet) über Winkel (%s)', vLabel));
+            legend('Location', 'best');
+        else
+            forceSmooth = nan(nImg, 1);
+        end
+
         % --- Alle Ergebnisse in einem Struct sammeln ---
-        % Felder: Frame, TimeStamp, Kraft (z), Winkel, geglätteter Winkel.
         results = struct( ...
             'video',         vidName, ...
             'label',         vLabel, ...
             'frame',         (1:nImg).', ...
             'timestamp',     tsFrame, ...
             'force',         fzFrame, ...
+            'forceSmoothed', forceSmooth, ...
             'angle',         angleUnwrapped, ...
             'angleSmoothed', angleSmooth);
 
