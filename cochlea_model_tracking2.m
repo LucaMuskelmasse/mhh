@@ -29,7 +29,7 @@ clear; clc; close all;
 % Breite und Höhe linear (Steigung). Da jede Ecke EINZELN nach ihrem Abstand
 % zum Mittelpunkt skaliert wird, werden die Boxen zu Trapezen / echten Vierecken.
 rectWidth   = 7;     % Grundbreite (tangential) bei Abstand 0 [px]
-rectHeight  = 0;     % Grundhöhe   (normal)     bei Abstand 0 [px]
+rectHeight  = 12;    % Grundhöhe   (normal)     bei Abstand 0 [px]
 widthSlope  = 0;     % Breitenzuwachs je px Abstand zum Mittelpunkt [px/px]
 heightSlope = 0.5;   % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
 
@@ -232,7 +232,44 @@ ylabel('Row (y)');
 plot(TipCoordinates2(:,2), TipCoordinates2(:,1), 'gx', 'MarkerSize', 8, 'LineWidth', 1.5);
 plot(TipCoordinates2(:,2), TipCoordinates2(:,1), 'g-', 'LineWidth', 1.0);
 
-% Mittelpunkt zur Orientierung
+% Mittelpunkt + Eingang (= entferntes Trajektorienende) + Referenzlinie
+cochleaEntrance = [xs(idxLast), ys(idxLast)];   % [x, y] = [col, row]
 plot(M(1), M(2), 'cx', 'MarkerSize', 15, 'LineWidth', 2);
-legend({'Tip (grüne Kreuze)', 'Tip-Linie', 'Mittelpunkt'}, 'Location', 'best');
+plot(cochleaEntrance(1), cochleaEntrance(2), 'm+', 'MarkerSize', 15, 'LineWidth', 2);
+plot([M(1) cochleaEntrance(1)], [M(2) cochleaEntrance(2)], 'm-', 'LineWidth', 1.5);
+legend({'Tip (grüne Kreuze)', 'Tip-Linie', 'Mittelpunkt', 'Eingang', 'Referenzlinie'}, ...
+    'Location', 'best');
 hold off;
+
+%% 7. Winkel zwischen Referenzlinie (Mittelpunkt->Eingang) und Tip-Linie
+% Vorzeichen: gegen den Uhrzeigersinn = positiv (y-Achse zeigt im Bild nach
+% unten -> beim Kreuzprodukt berücksichtigt). Verlauf wird über die Frames
+% entfaltet (unwrap), kann also >180° / >360° werden (anguläre Insertionstiefe).
+% Null = Tip auf der Mittelpunkt->Eingang-Linie. Identisch zu cochlea_model_tracking.m.
+cx = M(1);   cy = M(2);                              % Mittelpunkt [x, y]
+ax = cochleaEntrance(1) - cx;                        % Referenzvektor (Eingang)
+ay = cochleaEntrance(2) - cy;
+
+nImg = size(TipCoordinates2, 1);
+angleDeg = nan(nImg, 1);
+for k = 1:nImg
+    tc = TipCoordinates2(k, :);                      % [row, col]
+    if all(tc ~= 0) && ~any(isnan(tc))
+        bx = tc(2) - cx;                             % Tip-Vektor (col = x)
+        by = tc(1) - cy;                             % (row = y)
+        angleDeg(k) = atan2d(ay*bx - ax*by, ax*bx + ay*by);
+    end
+end
+
+valid = ~isnan(angleDeg);
+if any(valid)
+    angleUnwrapped = nan(nImg, 1);
+    angleUnwrapped(valid) = rad2deg(unwrap(deg2rad(angleDeg(valid))));
+
+    figure('Name', 'Winkel (automatisch)', 'NumberTitle', 'off');
+    plot(find(valid), angleUnwrapped(valid), 'b.-', 'LineWidth', 1.5, 'MarkerSize', 12);
+    grid on;
+    xlabel('Frame');
+    ylabel('Winkel [°]');
+    title('Winkel Referenz-/Tip-Linie (gegen Uhrzeigersinn positiv)');
+end
