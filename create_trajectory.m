@@ -22,7 +22,7 @@ videoFullPath = fullfile(vidDir, vidFile);
 
 %% 2. Read only the first frame
 v = VideoReader(videoFullPath);
-firstFrame = read(v, 1);
+firstFrame = read(v, v.NumFrames);
 if size(firstFrame, 3) == 1
     firstFrame = repmat(firstFrame, [1 1 3]);   % auf RGB bringen
 end
