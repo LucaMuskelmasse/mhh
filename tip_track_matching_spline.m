@@ -24,13 +24,35 @@ imds = imageDatastore(fullfile(ImgPath, '*.jpg'));
 % Get number of images
 ImageNummax = numel(imds.Files);
 
-% Initialize structure array
-ImageData = struct('name', [], 'path', [], 'gray', [], 'bw', []);
-ImageData(ImageNummax).name = []; % Preallocate
-
-% Read and process images one by one (no RGB storage)
-reset(imds);
+% --- Temperaturen und Zeitstempel aus den Dateinamen lesen ---
+% Dateiname-Format: yyyyMMdd_HHmmss_..._<Temperatur mit '-' statt '.'>.jpg
+% So lässt sich der Aufwärmvorgang (Anfang bis höchste Temperatur) bestimmen.
+T_all  = zeros(ImageNummax, 1);
+ts_all = NaT(ImageNummax, 1);
 for n = 1:ImageNummax
+    [~, name, ~] = fileparts(imds.Files{n});
+    parts     = strsplit(name, '_');
+    T_all(n)  = str2double(strrep(parts{end}, '-', '.'));
+    ts_all(n) = datetime([parts{1} '_' parts{2}], 'InputFormat', 'yyyyMMdd_HHmmss');
+end
+
+% --- Nur den Aufwärmvorgang behalten: von Anfang bis zur höchsten Temperatur ---
+% Die Bilder NACH dem Temperaturmaximum (Abkühlvorgang) werden nicht benötigt
+% und daher gar nicht erst eingelesen/ausgewertet.
+[~, kMax] = max(T_all);
+fprintf(['Aufwärmvorgang: Bilder 1 bis %d (max. Temperatur %.2f °C); ', ...
+         '%d Abkühlbilder werden ignoriert.\n'], kMax, T_all(kMax), ImageNummax - kMax);
+
+T         = T_all(1:kMax);    % Temperatur je Aufwärm-Bild
+timestamp = ts_all(1:kMax);   % Zeitstempel je Aufwärm-Bild
+
+% Initialize structure array (nur Aufwärmvorgang)
+ImageData = struct('name', [], 'path', [], 'gray', [], 'bw', []);
+ImageData(kMax).name = []; % Preallocate
+
+% Read and process images one by one (no RGB storage), nur bis zum Maximum
+reset(imds);
+for n = 1:kMax
     img = read(imds);
 
     % Convert to grayscale if RGB
@@ -301,19 +323,14 @@ viscircles([xTip, yTip], tipRadius, 'Color', 'g');
 
 %% test
 %% 4. Compute Tip coordinates for all images using fixed masks with curvature and connectivity check
+% Nur die Aufwärm-Bilder (1..kMax) werden hier verarbeitet, da ImageData
+% bereits auf den Aufwärmvorgang beschränkt ist.
 numImages = numel(ImageData);
 TipCoordinates = zeros(numImages, 2); % [row, col]
 TipCurvature = zeros(numImages, 1);  % store tip curvature
 curvatureThreshold = 0.06;           % example threshold, adjust as needed
-timestamp = NaT(numImages, 1);
 
 for k = 1:numImages
-
-    [~, name, ~] = fileparts(imds.Files{k});
-    parts        = strsplit(name, '_');
-    T(k)         = str2double(strrep(parts{end}, '-', '.'));
-    timestamp(k) = datetime([parts{1} '_' parts{2}], 'InputFormat', 'yyyyMMdd_HHmmss');
-
 
     bwImg = ImageData(k).bw;
     sz = size(bwImg);
