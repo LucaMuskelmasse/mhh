@@ -59,15 +59,8 @@ for n = 1:ImageNummax
     end
     tubeFG = bwLargest;
 
-    % --- Flackerfreie Anzeige: Bild nur einmal anlegen, danach CData updaten ---
-    if n == 1
-        figure(1);
-        hBwImg = imshow(bwLargest);
-        title('Größte zusammenhängende Fläche');
-    else
-        set(hBwImg, 'CData', bwLargest);
-    end
-    drawnow;
+    figure(1)
+    imshow(tubeFG);
 
     % --- Skelettierung mit Lückenschließung ---
 
