@@ -28,17 +28,19 @@ frameRate   = v.FrameRate;                       % Bilder pro Sekunde
 tVec        = (0:ImageNummax-1).' / frameRate;   % Zeit je Frame [s]
 
 % Initialize structure array
-ImageData = struct('name', [], 'path', [], 'gray', [], 'bw', []);
+ImageData = struct('name', [], 'path', [], 'rgb', [], 'gray', [], 'bw', []);
 ImageData(ImageNummax).name = [];
 
 %% 3. Hauptschleife über alle Frames
 for n = 1:ImageNummax
     img = read(v, n);
 
-    % --- Grauwertbild + Filter ---
+    % --- RGB sicherstellen + Grauwertbild für Verarbeitung ---
     if size(img,3) == 3
+        rgbImg  = img;
         grayImg = rgb2gray(img);
     else
+        rgbImg  = repmat(img, [1 1 3]);
         grayImg = img;
     end
     grayImgFiltered = medfilt2(grayImg, [3 3]);
@@ -146,6 +148,7 @@ for n = 1:ImageNummax
 
     % --- In Struktur speichern ---
     ImageData(n).name = sprintf('%s_frame%04d', vidName, n);
+    ImageData(n).rgb  = rgbImg;
     ImageData(n).gray = grayImgFiltered;
     ImageData(n).bw   = bwImg;
     ImageData(n).skel = skel;
@@ -199,7 +202,7 @@ drawFrame(hAx, ImageData, 1, cmap, kMin, kMax);
 function drawFrame(hAx, ImageData, n, cmap, kMin, kMax)
     n = min(max(round(n), 1), numel(ImageData));
 
-    imshow(ImageData(n).gray, 'Parent', hAx);
+    imshow(ImageData(n).rgb, 'Parent', hAx);
     hold(hAx, 'on');
 
     kValues = ImageData(n).kappa;
