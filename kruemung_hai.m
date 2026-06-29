@@ -12,7 +12,7 @@
 clear; clc; close all;
 
 %% 1. Video auswählen (mit Default-Pfad)
-defaultPath = 'M:\nascas2\Projects\MemoryCI 2.0\1 Dokumentation\AP01_Iterative Inlay-Entwicklung\AP 1.B BFR-Tests\Testergebnisse\2026-06-23-MV71-11-MV71-12';
+defaultPath = 'M:\nascas2\Students\Nguyen\1_Messversuch\26_06_15_Messung\pause_50ms\25ms';
 [vidFile, vidDir] = uigetfile({'*.avi','AVI Video (*.avi)'; '*.*','Alle Dateien (*.*)'}, ...
     'Select AVI video', defaultPath);
 if isequal(vidFile, 0)
