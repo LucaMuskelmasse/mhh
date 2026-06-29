@@ -49,8 +49,25 @@ for n = 1:ImageNummax
     % zurück, in der true = Schlauchfarbe erkannt. Den Funktionsnamen hier anpassen.
     tubeFG = createMask(rgbImg);   % <-- Name der generierten Funktion anpassen
 
-    figure(1)
-    imshow(tubeFG);
+    % --- Nur die größte zusammenhängende Fläche behalten (weiß), Rest schwarz ---
+    bwLargest = false(size(tubeFG));
+    ccDisp = bwconncomp(tubeFG);
+    if ccDisp.NumObjects >= 1
+        areas = cellfun(@numel, ccDisp.PixelIdxList);
+        [~, iBig] = max(areas);
+        bwLargest(ccDisp.PixelIdxList{iBig}) = true;
+    end
+    tubeFG = bwLargest;
+
+    % --- Flackerfreie Anzeige: Bild nur einmal anlegen, danach CData updaten ---
+    if n == 1
+        figure(1);
+        hBwImg = imshow(bwLargest);
+        title('Größte zusammenhängende Fläche');
+    else
+        set(hBwImg, 'CData', bwLargest);
+    end
+    drawnow;
 
     % --- Skelettierung mit Lückenschließung ---
 
