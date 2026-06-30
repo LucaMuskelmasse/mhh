@@ -54,11 +54,9 @@ useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
 stopTrun  = 70;         % Stopp-Temperatur Aufwaermen: Ende, wenn BEIDE Kanaele >= Wert
 stopCrun  = 37;         % Stopp-Temperatur Abkuehlen:  Ende, wenn BEIDE Kanaele <= Wert
-dbOnRun   = true;       % Deadband (Inner/Outer Band) in diesem Lauf aktiv?
-ibStartRun = 25;        % Inner Band Start [°C] (untere Grenze des Feinbereichs)
-ibEndRun   = 60;        % Inner Band Ende  [°C] (obere Grenze des Feinbereichs)
-ibStepRun  = 0.1;       % Schrittweite im Inner Band  [°C] (fein)
-obStepRun  = 1.0;       % Schrittweite im Outer Band  [°C] (grob)
+dbOnRun    = true;      % Deadband (Programmablaufplan) in diesem Lauf aktiv?
+dbEdgesRun = [-Inf, 25, 70, Inf];  % Segmentgrenzen [°C] (N+1 Werte)
+dbValsRun  = [1, 0.1, 1];          % Deadband je Segment [°C] (N Werte)
 
 %% ================================ UI-Aufbau =====================================
 fig = uifigure('Name','BFR-Versuch — Aufnahmesteuerung', ...
@@ -74,18 +72,18 @@ gMain.ColumnWidth = {370, '1x'};
 % Steuerungs- und Zaehler-Panel untereinander Platz haben. Scrollbar, falls
 % der Parameterblock einmal hoeher wird als das Fenster -> Steuerung bleibt
 % immer erreichbar.
-gLeft = uigridlayout(gMain, [3 1]);
+gLeft = uigridlayout(gMain, [4 1]);
 gLeft.Layout.Row    = [1 2];
 gLeft.Layout.Column = 1;
-gLeft.RowHeight     = {'fit','fit','fit'};
+gLeft.RowHeight     = {'fit','fit','fit','fit'};
 gLeft.Padding       = [0 0 0 0];
 gLeft.Scrollable    = 'on';
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [20 3]);
+gP = uigridlayout(pnlParam, [15 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 20);
+gP.RowHeight   = repmat({'fit'}, 1, 15);
 
 uilabel(gP, 'Text','COM-Port:');
 % Zuletzt benutzten Port (falls gemerkt) als Vorauswahl laden
@@ -131,42 +129,6 @@ edtStopC = uieditfield(gP, 'numeric', 'Value',37, ...
     'Tooltip',['Abkuehlvorgang: Lauf stoppt automatisch, wenn BEIDE ' ...
                'Kanaele <= diesem Wert sind.']);
 edtStopC.Layout.Column = [2 3];
-
-chkDb = uicheckbox(gP, 'Text','Deadband aktiv', 'Value',true, ...
-    'Tooltip',['Aktiv: im Inner Band (IB-Start..IB-End) gilt der feine ' ...
-               'IB-Schritt, ausserhalb (Outer Band) der grobe OB-Schritt. ' ...
-               'Inaktiv: ueberall 0.1-Grad-Schritte.'], ...
-    'ValueChangedFcn', @(~,~) syncDbFields());
-chkDb.Layout.Column = [1 3];
-
-lblIbStart = uilabel(gP, 'Text','IB-Start [°C]:');
-edtIbStart = uieditfield(gP, 'numeric', 'Value',25, ...
-    'Tooltip',['Untere Grenze des Inner Bands (Feinbereich, ' ...
-               'Formgedaechtniseffekt). Darunter gilt das Outer Band.']);
-edtIbStart.Layout.Column = [2 3];
-
-lblIbEnd = uilabel(gP, 'Text','IB-End [°C]:');
-edtIbEnd = uieditfield(gP, 'numeric', 'Value',60, ...
-    'Tooltip',['Obere Grenze des Inner Bands (Feinbereich, ' ...
-               'Formgedaechtniseffekt). Darueber gilt das Outer Band.']);
-edtIbEnd.Layout.Column = [2 3];
-
-lblIbStep = uilabel(gP, 'Text','IB-Schritt [°C]:');
-edtIbStep = uieditfield(gP, 'numeric', 'Value',0.1, 'Limits',[0 Inf], ...
-    'LowerLimitInclusive','off', ...
-    'Tooltip',['Schrittweite im Inner Band: Bild erst, wenn sich die ' ...
-               'Temperatur seit dem letzten Bild um diesen Wert geaendert hat.']);
-edtIbStep.Layout.Column = [2 3];
-
-lblObStep = uilabel(gP, 'Text','OB-Schritt [°C]:');
-edtObStep = uieditfield(gP, 'numeric', 'Value',1.0, 'Limits',[0 Inf], ...
-    'LowerLimitInclusive','off', ...
-    'Tooltip',['Schrittweite im Outer Band (ausserhalb IB-Start..IB-End): ' ...
-               'Bild erst nach einer Aenderung um diesen Wert.']);
-edtObStep.Layout.Column = [2 3];
-
-% Deadband-Felder passend zum Haekchen ein-/ausblenden (Initialzustand)
-syncDbFields();
 
 uilabel(gP, 'Text','Kameras:');
 ddCams = uidropdown(gP, ...
@@ -227,9 +189,44 @@ ddForm2.Layout.Column = [2 3];
 % Inlay-/Muster-/Form-Felder passend zur Kameraauswahl ein-/ausblenden
 syncInlayFields();
 
+% --- Programmablaufplan-Panel (temperaturabhaengiges Deadband) ---
+pnlDb = uipanel(gLeft, 'Title','Programmablaufplan (Deadband)');
+gD = uigridlayout(pnlDb, [3 2]);
+gD.RowHeight   = {'fit', 132, 'fit'};
+gD.ColumnWidth = {'1x','1x'};
+
+chkDb = uicheckbox(gD, 'Text','Deadband aktiv', 'Value',true, ...
+    'Tooltip',['Aktiv: Bild erst, wenn sich die Temperatur seit dem letzten ' ...
+               'Bild um den fuer ihren Abschnitt geltenden Deadband-Wert ' ...
+               'geaendert hat. Inaktiv: ueberall jeder 0.1-Grad-Schritt.'], ...
+    'ValueChangedFcn', @(~,~) syncDbFields());
+chkDb.Layout.Row = 1;  chkDb.Layout.Column = [1 2];
+
+tblDb = uitable(gD, ...
+    'ColumnName',     {'Start','Ende','Deadband'}, ...
+    'ColumnEditable', [false true true], ...
+    'ColumnFormat',   {'numeric','numeric','numeric'}, ...
+    'Data',           [-Inf 25 1; 25 70 0.1; 70 Inf 1], ...
+    'CellEditCallback', @onDbEdit, ...
+    'Tooltip',        ['Temperaturabschnitte und ihr Deadband (°C). Start ist ' ...
+                       'fest -inf in Zeile 1, Ende fest inf in der letzten ' ...
+                       'Zeile. Ende und Deadband editierbar; Start folgt ' ...
+                       'automatisch dem Ende der Zeile darueber.']);
+tblDb.Layout.Row = 2;  tblDb.Layout.Column = [1 2];
+
+btnDbAdd = uibutton(gD, 'Text','+  Zeile', 'Tooltip','Abschnitt hinzufuegen', ...
+                    'ButtonPushedFcn', @(~,~) dbAddRow());
+btnDbAdd.Layout.Row = 3;  btnDbAdd.Layout.Column = 1;
+btnDbDel = uibutton(gD, 'Text','−  Zeile', 'Tooltip','Letzten Abschnitt entfernen', ...
+                    'ButtonPushedFcn', @(~,~) dbDelRow());
+btnDbDel.Layout.Row = 3;  btnDbDel.Layout.Column = 2;
+
+% Tabelle/Buttons passend zum Haekchen aktivieren/sperren (Initialzustand)
+syncDbFields();
+
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
 lockables = [ddCom, btnPorts, btnFindThermo, edtInt, edtStopT, edtStopC, ...
-             chkDb, edtIbStart, edtIbEnd, edtIbStep, edtObStep, ddCams, ...
+             chkDb, tblDb, btnDbAdd, btnDbDel, ddCams, ...
              edtBase, edtDatum, edtInlay1, ddMuster1, ddForm1, edtInlay2, ...
              ddMuster2, ddForm2, btnBrowseBase];
 
@@ -318,7 +315,7 @@ fig.Color = C.bg;
 
 % Layout-Raster: Hintergruende + etwas Luft zwischen den Elementen
 set([gMain gLeft gRight], 'BackgroundColor', C.bg);
-set([gP gC gZ],           'BackgroundColor', C.panel);
+set([gP gD gC gZ],        'BackgroundColor', C.panel);
 gMain.Padding   = [10 10 10 10];
 gMain.RowSpacing = 10;  gMain.ColumnSpacing = 10;
 gLeft.RowSpacing = 10;
@@ -336,6 +333,7 @@ set(findall(fig, 'Type','uidropdown'),         'BackgroundColor', C.field, 'Font
 set(findall(fig, 'Type','uicheckbox'),         'FontColor', C.text);
 set(findall(fig, 'Type','uibutton'),           'BackgroundColor', C.field, 'FontColor', C.text);
 set(findall(fig, 'Type','uistatebutton'),      'BackgroundColor', C.field, 'FontColor', C.text);
+set(findall(fig, 'Type','uitable'),            'BackgroundColor', C.field, 'ForegroundColor', C.text);
 
 % Akzente: Start gruen, Stop rot, Temperaturen in den Plot-Farben
 btnStart.BackgroundColor = C.start;
@@ -454,10 +452,12 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             stopTrun  = edtStopT.Value;
             stopCrun  = edtStopC.Value;
             dbOnRun    = logical(chkDb.Value);
-            ibStartRun = edtIbStart.Value;
-            ibEndRun   = edtIbEnd.Value;
-            ibStepRun  = edtIbStep.Value;
-            obStepRun  = edtObStep.Value;
+            % Programmablaufplan einfrieren: Grenzen [-inf, b1, ..., inf] und
+            % Deadband je Segment.
+            dbData     = tblDb.Data;
+            dbData     = dbNormalize(dbData);        % Start-Spalte/inf absichern
+            dbEdgesRun = [dbData(1,1); dbData(:,2)]';   % 1 x (N+1)
+            dbValsRun  = dbData(:,3)';                  % 1 x N
             baseDir   = strtrim(string(edtBase.Value));
             datum     = strtrim(string(edtDatum.Value));
             inlay1    = regexprep(strtrim(string(edtInlay1.Value)), '^(MV|mv)', '');
@@ -483,10 +483,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             prefixRun = erase(datum, "-");
 
             if dbOnRun
-                assert(ibStartRun < ibEndRun, ...
-                       "IB-Start muss unterhalb von IB-End liegen.");
-                assert(ibStepRun > 0, "IB-Schritt muss > 0 sein.");
-                assert(obStepRun > 0, "OB-Schritt muss > 0 sein.");
+                assert(all(diff(dbEdgesRun) > 0), ...
+                       "Programmablaufplan: Grenzen muessen streng aufsteigend sein (Start < Ende).");
+                assert(all(dbValsRun > 0) && ~any(isnan(dbValsRun)), ...
+                       "Programmablaufplan: alle Deadband-Werte muessen > 0 sein.");
             end
             % Nur die Inlays der aktiven Seite(n) sind Pflicht
             if useL
@@ -549,17 +549,22 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             fTxt1 = string(ddForm1.Items{strcmp(string(ddForm1.ItemsData), form1)});
             mTxt2 = string(ddMuster2.Items{strcmp(string(ddMuster2.ItemsData), muster2)});
             fTxt2 = string(ddForm2.Items{strcmp(string(ddForm2.ItemsData), form2)});
+            % Programmablaufplan (Deadband) als CSV-Zeilen aufbereiten
+            gv = @(x) string(strrep(sprintf('%g', x), '.', ','));   % Deadband -> Komma
+            dbLines = "Deadband aktiv;" + jaNein(dbOnRun);
+            for kSeg = 1:numel(dbValsRun)
+                dbLines(end+1) = "Deadband Abschnitt " + kSeg + ";" + ...
+                    edgeStr(dbEdgesRun(kSeg)) + " .. " + edgeStr(dbEdgesRun(kSeg+1)) + ...
+                    " -> " + gv(dbValsRun(kSeg)); %#ok<AGROW>
+            end
+            dbLines = dbLines(:);                          % Spaltenvektor
             paramLines = [ ...
                 "Parameter;Wert"; ...
                 "COM-Port;"            + port; ...
                 "Intervall [s];"       + strrep(sprintf('%.2f', intervall), '.', ','); ...
                 "Stopp Aufwaermen [Grad C];" + n1(stopTrun); ...
                 "Stopp Abkuehlen [Grad C];"  + n1(stopCrun); ...
-                "Deadband aktiv;"      + jaNein(dbOnRun); ...
-                "IB-Start [Grad C];"   + n1(ibStartRun); ...
-                "IB-End [Grad C];"     + n1(ibEndRun); ...
-                "IB-Schritt [Grad C];" + n1(ibStepRun); ...
-                "OB-Schritt [Grad C];" + n1(obStepRun); ...
+                dbLines; ...
                 "Kameras;"             + camLabel(); ...
                 "Datum;"               + datum; ...
                 "Inlay 1 (Kamera 1);"  + inl1Str; ...
@@ -658,9 +663,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             lamp.Color     = [0 0.8 0];
             lblState.Text  = 'läuft (Aufwärmen)';
             if dbOnRun
-                dbInfo = sprintf(['Deadband: Inner Band %.1f..%.1f °C Schritt %.1f °C, ' ...
-                                  'Outer Band Schritt %.1f °C'], ...
-                                 ibStartRun, ibEndRun, ibStepRun, obStepRun);
+                dbInfo = sprintf('Deadband: %d Abschnitt(e) laut Programmablaufplan', ...
+                                 numel(dbValsRun));
             else
                 dbInfo = 'Deadband inaktiv (ueberall 0.1-Grad-Schritte)';
             end
@@ -746,23 +750,15 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             end
 
             % --- Ausloeselogik ---
-            % Deadband aktiv: im Inner Band (IB-Start <= T <= IB-End) gilt der
-            %   feine IB-Schritt, im Outer Band (T < IB-Start oder T > IB-End)
-            %   der grobe OB-Schritt -> Bild erst nach Aenderung um diesen Wert.
+            % Deadband aktiv: pro Kanal gilt der Deadband-Wert des Abschnitts,
+            %   in den die aktuelle Temperatur faellt (Programmablaufplan) ->
+            %   Bild erst nach Aenderung um diesen Wert.
             % Deadband inaktiv: ueberall jeder 0.1-Grad-Schritt (step = 0).
             % Richtung je Modus: Aufwaermen -> Anstieg, Abkuehlen -> Abfall.
             stepL = 0;  stepR = 0;            % 0 -> jeder Schritt loest aus
             if dbOnRun
-                if vals(1) < ibStartRun || vals(1) > ibEndRun
-                    stepL = obStepRun;        % Outer Band -> grob
-                else
-                    stepL = ibStepRun;        % Inner Band -> fein
-                end
-                if vals(2) < ibStartRun || vals(2) > ibEndRun
-                    stepR = obStepRun;
-                else
-                    stepR = ibStepRun;
-                end
+                stepL = deadbandFor(vals(1));
+                stepR = deadbandFor(vals(2));
             end
             eps0 = 1e-9;                      % Toleranz gegen Rundungsfehler
             if cooling
@@ -869,11 +865,72 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function syncDbFields()
-        % Graut die Deadband-Felder passend zum Haekchen ein/aus.
-        % Werte bleiben dabei erhalten (nur Enable wird umgeschaltet).
+        % Aktiviert/sperrt die Programmablaufplan-Tabelle + Buttons passend
+        % zum Haekchen. Inhalt bleibt erhalten (nur Enable wird umgeschaltet).
         if chkDb.Value, st = 'on'; else, st = 'off'; end
-        set([lblIbStart edtIbStart lblIbEnd edtIbEnd ...
-             lblIbStep edtIbStep lblObStep edtObStep], 'Enable', st);
+        tblDb.Enable = st;  btnDbAdd.Enable = st;  btnDbDel.Enable = st;
+    end
+
+    % ----------------------------------------------- Programmablaufplan-Helfer ---
+    function onDbEdit(~, ev)
+        % Reaktion auf Zellbearbeitung der Deadband-Tabelle: Deadband > 0
+        % erzwingen, letztes Ende fest auf inf halten und die Start-Spalte aus
+        % den Ende-Werten der Zeilen darueber neu ableiten.
+        d = tblDb.Data;
+        r = ev.Indices(1);  c = ev.Indices(2);
+        if c == 3 && (~(d(r,3) > 0) || isnan(d(r,3)))   % ungueltiges Deadband
+            d(r,3) = ev.PreviousData;
+        end
+        if c == 2 && r == size(d,1)                     % letztes Ende bleibt inf
+            d(r,2) = Inf;
+        end
+        tblDb.Data = dbNormalize(d);
+    end
+
+    function d = dbNormalize(d)
+        % Start(1)=-inf, Ende(letzte)=inf, Start(i)=Ende(i-1).
+        n = size(d,1);
+        d(1,1) = -Inf;  d(n,2) = Inf;
+        for i = 2:n, d(i,1) = d(i-1,2); end
+    end
+
+    function dbAddRow()
+        % Haengt einen Abschnitt an: neuer Schnittpunkt = bisherige untere
+        % Grenze der letzten Zeile + 10 (bzw. 25, falls -inf).
+        d = tblDb.Data;  n = size(d,1);
+        z = d(n,1) + 10;
+        if ~isfinite(z), z = 25; end
+        d(n,2) = z;                       % bisher letzte Zeile endet jetzt bei z
+        d = [d; z, Inf, 1];               % neuer Abschnitt z..inf mit Deadband 1
+        tblDb.Data = dbNormalize(d);
+    end
+
+    function dbDelRow()
+        % Entfernt den letzten Abschnitt (mind. eine Zeile bleibt erhalten).
+        d = tblDb.Data;
+        if size(d,1) <= 1
+            logMsg("Programmablaufplan: mindestens eine Zeile erforderlich.");
+            return;
+        end
+        d(end,:) = [];
+        tblDb.Data = dbNormalize(d);
+    end
+
+    function step = deadbandFor(T)
+        % Deadband fuer Temperatur T anhand der eingefrorenen Abschnitte.
+        if isnan(T), step = dbValsRun(end); return; end
+        seg = find(T < dbEdgesRun(2:end), 1);   % erster Abschnitt mit Obergrenze > T
+        if isempty(seg), seg = numel(dbValsRun); end
+        step = dbValsRun(seg);
+    end
+
+    function s = edgeStr(x)
+        % Segmentgrenze fuer Anzeige/CSV: -inf / inf / Zahl mit Komma.
+        if isinf(x)
+            if x < 0, s = "-inf"; else, s = "inf"; end
+        else
+            s = string(strrep(sprintf('%g', x), '.', ','));
+        end
     end
 
     function setInlay(lbl, edt, on)
