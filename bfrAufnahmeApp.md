@@ -21,6 +21,7 @@ Materials (Inlay) beim Aufwärmen und Abkühlen Bild für Bild dokumentiert.
 | `listKameras.m` | Diagnose: listet winvideo-Geräte (ID + Name) und DNX64-Port-Pfade auf. Hilft, die Kamera-`CONFIG` zu kalibrieren. |
 | `testKameras.m` | Diagnose: öffnet die Dino-Lites einzeln/gemeinsam **ohne** die App, um Geräte-/USB-Probleme vom App-Code zu trennen. |
 | `bfrAufnahmeApp.md` | Diese Dokumentation. |
+| `camAssign.mat` | **Zur Laufzeit** erzeugt (neben dem Skript): gespeicherte Kamera-Zuweisung des Einrichtungs-Wizards (USB-Port-Pfad je Kamera). Nicht im Repo, maschinenspezifisch. |
 
 Die App ist **eigenständig**: Alle Hilfsfunktionen (`getHH806Temp`,
 `captureSingleFrameSide`, `openDinoLiteCameras`, Dekodierung, Bildstempel …)
@@ -94,6 +95,9 @@ UI-Aufbau; alle Komponenten werden per `findall(fig,'Type',…)` eingefärbt.
 | Stopp Abk. [°C] | `edtStopC` | **37** | Abkühlen stoppt, wenn beide Kanäle ≤ Wert. |
 | Abkühlen ab [°C] | `edtCoolAct` | **80** | Abkühlvorgang aktiviert sich automatisch, wenn beide Kanäle ≥ Wert. |
 | Kameras | `ddCams` | „Beide" | ItemsData `beide`/`links`/`rechts`. |
+| Kameras zuweisen … | `btnFindCams` | – | Startet den **Kamera-Einrichtungs-Wizard** (§10). |
+| Zuweisung testen | `btnTestCams` | (aus) | Öffnet beide zugewiesenen Kameras zur Sichtkontrolle (nur wenn beide zugewiesen). |
+| (Statuszeile) | `lblCamAssign` | – | Zeigt, ob/welche Kameras zugewiesen sind. |
 | Basisordner | `edtBase` (+ `btnBrowseBase`) | `D:\MemoryCI 2.0\BFR-Versuch` | Wurzel für Versuchsordner. |
 | Datum | `edtDatum` | heute (`YYYY-MM-DD`) | Bestandteil des Ordnernamens; daraus wird der Datums-Präfix `YYYYMMDD` abgeleitet. |
 | Inlay 1 / 2 | `edtInlay1`/`edtInlay2` | leer | Kennnummer je Kamera (führendes „MV"/„mv" wird automatisch entfernt). Pflicht für aktive Seite(n). |
@@ -317,6 +321,32 @@ mal „links zeigt die Webcam", mal „Kameras vertauscht".
 Port-Pfad bei der passenden Seite in `CONFIG.idaKey` ergänzen. Die Scharfstell-
 Fenster sind die finale **Sichtkontrolle** (LINKS/RECHTS richtig?).
 
+### Kamera-Einrichtungs-Wizard (laptop-unabhängig, ohne Code-Edit)
+
+Statt die `CONFIG`-Ports von Hand zu pflegen, gibt es im Parameter-Panel den
+Button **„Kameras zuweisen …"** (`findCameras`):
+- Öffnet **nacheinander jede** winvideo-Kamera mit Live-Vorschau; pro Kamera ein
+  Dialog mit **Kamera 1 (links) / Kamera 2 (rechts) / Ignorieren** (`assignOneCamera`).
+- Endet, wenn **beide** zugewiesen sind oder **alle** Kameras durch sind.
+- Gespeichert wird je Kamera der **USB-Port-Pfad** (`idaKey`), nicht der
+  instabile winvideo-Index — ermittelt über `dinoWinvideoMap` (Dino-Lites per
+  Name filtern, DNX64-Ports per Reihenfolge zuordnen). Webcam (kein Port) kann
+  nicht zugewiesen werden.
+- Persistenz: **Datei `camAssign.mat`** neben dem Skript (`saveCamAssign` /
+  Laden beim Start). Beim nächsten Start ist die Zuweisung **vorausgewählt**;
+  Status zeigt `lblCamAssign`.
+- Diese Zuweisung hat in `openDinoLiteCameras` **Vorrang** vor den fest
+  hinterlegten `CONFIG.idaKey` (Argument `assignPorts`). Ist nichts gespeichert,
+  gilt der `CONFIG`-Default. Der **winvideo-Index** wird weiterhin dynamisch
+  ermittelt (robust gegen Webcam-Umsortierung).
+- **„Zuweisung testen"** (`testCameras`, nur aktiv wenn beide zugewiesen): öffnet
+  beide Kameras in LINKS/RECHTS-Fenstern + Bestätigungsdialog — **ohne** Lauf,
+  reine Sichtkontrolle.
+- **Grenze:** Der gespeicherte Port ist **EIN** Pfad. Oszilliert er (wie bei einer
+  Kamera auf dem aktuellen Laptop), schlägt die Erkennung fehl → einfach Wizard
+  erneut laufen lassen (re-assign). Die fest hinterlegte Multi-Key-`CONFIG` deckt
+  beide bekannten Werte ab und dient als Default ohne gespeicherte Zuweisung.
+
 ---
 
 ## 11. Thermometer (Omega HH806AWE)
@@ -346,6 +376,11 @@ Fenster sind die finale **Sichtkontrolle** (LINKS/RECHTS richtig?).
 | `onBrowse(edt)` | Ordnerdialog für den Basisordner. |
 | `refreshPorts()` | COM-Port-Liste aus `serialportlist` aktualisieren (aktuelle Auswahl bleibt erhalten). |
 | `findThermo()` | Thermometer per Handshake suchen und Port auswählen. |
+| `findCameras()` | Kamera-Wizard: jede Kamera nacheinander zeigen + zuweisen, speichern (§10). |
+| `assignOneCamera(wid,nm,k,total)` | Eine Kamera live zeigen + Seite abfragen (1/2/0). |
+| `assignDone(h,v)` | Dialog-Knopf-Callback (Wahl merken, `uiresume`). |
+| `testCameras()` | Beide zugewiesenen Kameras zur Sichtkontrolle öffnen (kein Lauf). |
+| `saveCamAssign()` / `updateCamAssignUI()` | Zuweisung in `camAssign.mat` speichern / Statuszeile + Test-Button-Freigabe. |
 | `onStart(~,~)` | Parameter lesen/validieren/einfrieren, Ordner+CSV anlegen, serialport + Kameras öffnen, Vorschau anhängen, Bildstempel-Atlas vorbauen, Timer starten. |
 | `onCool(~,~)` | Zwischen Aufwärm-/Abkühlmodus umschalten (setzt `cooling`, `prevL/prevR`, Statustext); auch programmgesteuert für die Auto-Aktivierung aufgerufen. |
 | `onTick(~,~)` | Ein Messzyklus: Temperatur lesen, Anzeige/Plot, Auto-Stopp, Auto-Abkühl-Aktivierung, Auslöselogik (`deadbandFor`) + Aufnahme je Seite. Fehler in einem Tick brechen den Lauf nicht ab. |
@@ -380,6 +415,7 @@ Fenster sind die finale **Sichtkontrolle** (LINKS/RECHTS richtig?).
 | `throttledPreviewUpdate(~,event,himage)` | Vorschau ≤ 1×/s aktualisieren (Speicher, §8). |
 | `openDinoLiteCameras(dllPath,sides)` | Dino-Lites öffnen mit dynamischer winvideo-Zuordnung + Multi-Key-Fail-safe + Scharfstell-Dialog (§10). |
 | `extractPortKey(ida)` | USB-Port-Kennung aus dem DNX64-IDA-String extrahieren. |
+| `dinoWinvideoMap(dllPath)` | Alle winvideo-Kameras + Dino-Lite-Port-Zuordnung (für den Wizard). |
 | `getHH806Temp(portOrObj,closeAfter)` | Eine Temperaturmessung lesen (§11). |
 | `buildCmd(payload)` / `decodeMeasurement(raw)` / `unitName(c)` | Omega-Protokoll: Befehl bauen / Antwort dekodieren / Einheit. |
 | `captureSingleFrameSide(cam,outDir,datePrefix,temp,sideLabel,inlayLabel,csvPath)` | Ein Bild holen, **stempeln**, speichern, CSV-Zeile anhängen. |

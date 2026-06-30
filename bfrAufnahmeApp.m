@@ -62,6 +62,21 @@ dbWarmVals  = [1, 0.1, 1];          % Aufwaermen: Deadband je Segment [°C]
 dbCoolEdges = [-Inf, Inf];          % Abkuehlen:  Segmentgrenzen [°C]
 dbCoolVals  = 1;                    % Abkuehlen:  Deadband je Segment [°C]
 
+% Kamera-Zuweisung (per Wizard gesetzt, in Datei gespeichert): USB-Port-Pfad
+% je Kamera. Leer = keine Zuweisung -> openDinoLiteCameras nutzt CONFIG-Default.
+camAssign = struct('cam1Port','', 'cam2Port','');
+camAssignFile = fullfile(fileparts(mfilename('fullpath')), 'camAssign.mat');
+try
+    if isfile(camAssignFile)
+        Sca = load(camAssignFile, 'ca');
+        if isfield(Sca,'ca') && isstruct(Sca.ca) ...
+                && isfield(Sca.ca,'cam1Port') && isfield(Sca.ca,'cam2Port')
+            camAssign = Sca.ca;
+        end
+    end
+catch
+end
+
 %% ================================ UI-Aufbau =====================================
 fig = uifigure('Name','BFR-Versuch — Aufnahmesteuerung', ...
                'Position',[60 60 1280 780], ...
@@ -85,9 +100,9 @@ gLeft.Scrollable    = 'on';
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [16 3]);
+gP = uigridlayout(pnlParam, [19 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 16);
+gP.RowHeight   = repmat({'fit'}, 1, 19);
 
 uilabel(gP, 'Text','COM-Port:');
 % Zuletzt benutzten Port (falls gemerkt) als Vorauswahl laden
@@ -149,6 +164,22 @@ ddCams = uidropdown(gP, ...
     'Tooltip',       'Welche Kamera(s) sollen in diesem Lauf aufnehmen?', ...
     'ValueChangedFcn', @(~,~) syncInlayFields());
 ddCams.Layout.Column = [2 3];
+
+btnFindCams = uibutton(gP, 'Text','Kameras zuweisen …', ...
+    'Tooltip',['Oeffnet nacheinander alle Kameras; pro Kamera waehlst du ' ...
+               'Kamera 1 (links), Kamera 2 (rechts) oder Ignorieren. Die ' ...
+               'Zuweisung wird gespeichert und beim naechsten Start genutzt.'], ...
+    'ButtonPushedFcn', @(~,~) findCameras());
+btnFindCams.Layout.Column = [1 3];
+
+btnTestCams = uibutton(gP, 'Text','Zuweisung testen', 'Enable','off', ...
+    'Tooltip',['Oeffnet beide zugewiesenen Kameras mit Beschriftung ' ...
+               'LINKS/RECHTS zur Sichtkontrolle (ohne den Lauf zu starten).'], ...
+    'ButtonPushedFcn', @(~,~) testCameras());
+btnTestCams.Layout.Column = [1 3];
+
+lblCamAssign = uilabel(gP, 'Text','', 'FontSize',11);
+lblCamAssign.Layout.Column = [1 3];
 
 uilabel(gP, 'Text','Basisordner:');
 edtBase = uieditfield(gP, 'text', 'Value','D:\MemoryCI 2.0\BFR-Versuch');
@@ -261,9 +292,10 @@ syncDbFields();
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
 lockables = [ddCom, btnPorts, btnFindThermo, edtInt, edtStopT, edtStopC, ...
-             edtCoolAct, chkDb, tblDbWarm, btnWarmAdd, btnWarmDel, tblDbCool, btnCoolAdd, ...
-             btnCoolDel, ddCams, edtBase, edtDatum, edtInlay1, ddMuster1, ...
-             ddForm1, edtInlay2, ddMuster2, ddForm2, btnBrowseBase];
+             edtCoolAct, btnFindCams, btnTestCams, chkDb, tblDbWarm, btnWarmAdd, ...
+             btnWarmDel, tblDbCool, btnCoolAdd, btnCoolDel, ddCams, edtBase, ...
+             edtDatum, edtInlay1, ddMuster1, ddForm1, edtInlay2, ddMuster2, ...
+             ddForm2, btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -401,6 +433,7 @@ txtLog.BackgroundColor = [0.08 0.08 0.10];
 txtLog.FontColor       = [0.78 0.84 0.78];
 txtLog.FontName        = 'Consolas';
 
+updateCamAssignUI();    % Status der gespeicherten Kamera-Zuweisung anzeigen
 logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 
 %% ================================ Callbacks =====================================
@@ -475,6 +508,155 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         else
             logMsg("Kein Messgeraet gefunden. Bitte Port aus der Liste manuell waehlen.");
         end
+    end
+
+    % --------------------------------------------------- Kamera-Einrichtung ---
+    function updateCamAssignUI()
+        % Statuszeile + Test-Button-Freigabe gemaess gespeicherter Zuweisung.
+        has1 = strlength(string(camAssign.cam1Port)) > 0;
+        has2 = strlength(string(camAssign.cam2Port)) > 0;
+        m1 = '–';  if has1, m1 = '✓'; end
+        m2 = '–';  if has2, m2 = '✓'; end
+        if has1 || has2
+            lblCamAssign.Text = sprintf('Zuweisung gespeichert: Kamera 1 %s   Kamera 2 %s', m1, m2);
+        else
+            lblCamAssign.Text = 'Zuweisung: keine (Standard-Konfiguration)';
+        end
+        if has1 && has2, btnTestCams.Enable = 'on'; else, btnTestCams.Enable = 'off'; end
+    end
+
+    function saveCamAssign()
+        % Kamera-Zuweisung in Datei speichern (neben dem Skript).
+        try
+            ca = camAssign; %#ok<NASGU>
+            save(camAssignFile, 'ca');
+            logMsg("Kamera-Zuweisung gespeichert: " + camAssignFile);
+        catch ME
+            logMsg("Konnte Kamera-Zuweisung nicht speichern: " + string(ME.message));
+        end
+    end
+
+    function findCameras()
+        % Wizard: oeffnet nacheinander alle Kameras und laesst je Kamera
+        % Kamera 1 / Kamera 2 / Ignorieren waehlen. Endet, wenn beide
+        % zugewiesen sind oder alle Kameras durch sind.
+        if running, return; end
+        btnFindCams.Enable = 'off';  drawnow;
+        a1 = "";  a2 = "";
+        try
+            try, imaqreset; pause(0.3); catch, end
+            [winList, dinoIDs, dinoPorts] = dinoWinvideoMap("DNX64.dll");
+            if isempty(winList)
+                logMsg("Keine Kameras gefunden — Anschluss/Treiber pruefen.");
+            else
+                logMsg(sprintf("Kamera-Zuweisung: %d Kamera(s) werden nacheinander gezeigt.", numel(winList)));
+                for k = 1:numel(winList)
+                    wid = winList(k).id;
+                    port = "";
+                    ii = find(dinoIDs == wid, 1);
+                    if ~isempty(ii) && numel(dinoPorts) >= ii, port = dinoPorts(ii); end
+                    choice = assignOneCamera(wid, winList(k).name, k, numel(winList));
+                    if choice == 1 || choice == 2
+                        if strlength(port) == 0
+                            logMsg(sprintf(['winvideo %d ist keine Dino-Lite (kein USB-Port) ' ...
+                                '— nicht zugewiesen.'], wid));
+                        elseif choice == 1
+                            a1 = port;  logMsg(sprintf("winvideo %d -> Kamera 1 (links).", wid));
+                        else
+                            a2 = port;  logMsg(sprintf("winvideo %d -> Kamera 2 (rechts).", wid));
+                        end
+                    end
+                    if strlength(a1) > 0 && strlength(a2) > 0, break; end
+                end
+            end
+        catch ME
+            logMsg("Kamera-Zuweisung fehlgeschlagen: " + string(ME.message));
+        end
+        try, delete(findall(0,'Type','figure','Tag','bfrWizard')); catch, end
+        try, if libisloaded('DNX64'), unloadlibrary('DNX64'); end; catch, end
+
+        % Nur uebernehmen, was zugewiesen wurde (leere Auswahl laesst alten Wert)
+        if strlength(a1) > 0, camAssign.cam1Port = char(a1); end
+        if strlength(a2) > 0, camAssign.cam2Port = char(a2); end
+        saveCamAssign();
+        updateCamAssignUI();
+        btnFindCams.Enable = 'on';
+    end
+
+    function choice = assignOneCamera(wid, nm, k, total)
+        % Zeigt EINE Kamera live und fragt die Seite ab. Rueckgabe: 1/2/0.
+        choice = 0;  vid = [];  hFig = [];  hWait = [];
+        try
+            vid = videoinput('winvideo', wid);
+            scr = get(0,'ScreenSize');
+            hFig = figure('Name', sprintf('Kamera %d/%d: %s (winvideo %d)', k, total, nm, wid), ...
+                          'NumberTitle','off', 'MenuBar','none', 'Tag','bfrWizard', ...
+                          'Color',[0.11 0.11 0.13], ...
+                          'Position',[scr(3)*0.30, scr(4)*0.30, scr(3)*0.40, scr(4)*0.45]);
+            res = vid.VideoResolution;  nb = vid.NumberOfBands;
+            hAx = axes('Parent',hFig);
+            hIm = image(zeros(res(2), res(1), nb), 'Parent',hAx);
+            axis(hAx,'image'); axis(hAx,'off');
+            setappdata(hIm, 'UpdatePreviewWindowFcn', @throttledPreviewUpdate);
+            preview(vid, hIm);
+
+            hWait = figure('Name','Kamera zuweisen', 'NumberTitle','off', 'Tag','bfrWizard', ...
+                           'MenuBar','none', 'Resize','off', 'Color',[0.15 0.15 0.18], ...
+                           'Position',[scr(3)*0.40, scr(4)*0.14, 320, 160]);
+            uicontrol('Parent',hWait, 'Style','text', 'FontSize',11, ...
+                'Units','normalized', 'Position',[0.05 0.74 0.9 0.2], ...
+                'BackgroundColor',[0.15 0.15 0.18], 'ForegroundColor',[0.9 0.9 0.93], ...
+                'String', sprintf('Kamera %d von %d — welche Seite?', k, total));
+            uicontrol('Parent',hWait, 'Style','pushbutton', 'FontSize',11, ...
+                'Units','normalized', 'Position',[0.05 0.46 0.9 0.24], ...
+                'String','Kamera 1 (links)', 'Callback',@(~,~) assignDone(hWait,1));
+            uicontrol('Parent',hWait, 'Style','pushbutton', 'FontSize',11, ...
+                'Units','normalized', 'Position',[0.05 0.14 0.44 0.26], ...
+                'String','Kamera 2 (rechts)', 'Callback',@(~,~) assignDone(hWait,2));
+            uicontrol('Parent',hWait, 'Style','pushbutton', 'FontSize',11, ...
+                'Units','normalized', 'Position',[0.51 0.14 0.44 0.26], ...
+                'String','Ignorieren', 'Callback',@(~,~) assignDone(hWait,0));
+            hWait.UserData = 0;
+            uiwait(hWait);
+            if ishghandle(hWait), choice = hWait.UserData; end
+        catch ME
+            logMsg(sprintf("Kamera winvideo %d konnte nicht geoeffnet werden: %s", wid, string(ME.message)));
+        end
+        try, stoppreview(vid);     catch, end
+        try, delete(vid);          catch, end
+        try, delete(hFig);         catch, end
+        try, delete(hWait);        catch, end
+    end
+
+    function assignDone(h, v)
+        % Knopf-Callback im Zuweisungs-Dialog: Wahl merken und fortfahren.
+        if ishghandle(h), h.UserData = v; uiresume(h); end
+    end
+
+    function testCameras()
+        % Test: oeffnet beide zugewiesenen Kameras (LINKS/RECHTS beschriftet)
+        % zur Sichtkontrolle, ohne den Lauf zu starten.
+        if running, return; end
+        if strlength(string(camAssign.cam1Port)) == 0 || strlength(string(camAssign.cam2Port)) == 0
+            logMsg("Bitte zuerst beide Kameras zuweisen.");
+            return;
+        end
+        btnTestCams.Enable = 'off';  drawnow;
+        try
+            ap = struct('cam1', camAssign.cam1Port, 'cam2', camAssign.cam2Port);
+            ct = openDinoLiteCameras("DNX64.dll", ["LINKS","RECHTS"], ap, ...
+                "Test: Zeigen die Fenster LINKS/RECHTS die richtige Kamera?");
+            vv = [ct.left ct.right];
+            vv = vv(arrayfun(@isvalid, vv));
+            try, stoppreview(vv); catch, end
+            try, delete(vv);      catch, end
+            logMsg("Kamera-Test beendet.");
+        catch ME
+            logMsg("Kamera-Test fehlgeschlagen: " + string(ME.message));
+        end
+        try, delete(findall(0,'Type','figure','Tag','bfrPreview')); catch, end
+        try, if libisloaded('DNX64'), unloadlibrary('DNX64'); end; catch, end
+        updateCamAssignUI();
     end
 
     % ------------------------------------------------------------------ Start ---
@@ -644,7 +826,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             if useL, sides(end+1) = "LINKS";  end
             if useR, sides(end+1) = "RECHTS"; end
             logMsg("Oeffne Dino-Lite-Kamera(s): " + camLabel() + " …");
-            cams = openDinoLiteCameras("DNX64.dll", sides);
+            apRun = struct('cam1', camAssign.cam1Port, 'cam2', camAssign.cam2Port);
+            cams = openDinoLiteCameras("DNX64.dll", sides, apRun);
 
             % Externe Vorschaufenster schliessen und Streams in die App umleiten
             attachPreviews();
@@ -706,6 +889,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             set(lockables, 'Enable', 'on');
             syncInlayFields();          % Inlay-Sichtbarkeit wiederherstellen
             syncDbFields();             % Deadband-Felder-Zustand wiederherstellen
+            updateCamAssignUI();        % Test-Button-Freigabe wiederherstellen
             btnStart.Enable = 'on';
             btnStop.Enable  = 'off';
             btnCool.Enable  = 'off';
@@ -839,6 +1023,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
         set(lockables, 'Enable', 'on');
         syncInlayFields();          % Inlay-Sichtbarkeit wiederherstellen
         syncDbFields();             % Deadband-Felder-Zustand wiederherstellen
+        updateCamAssignUI();        % Test-Button-Freigabe wiederherstellen
         btnStart.Enable = 'on';
         btnStop.Enable  = 'off';
         btnCool.Enable  = 'off';
@@ -1200,7 +1385,7 @@ end
 %  lokalen Kopien auch entfernt werden.
 %  ###############################################################################
 
-function cams = openDinoLiteCameras(dllPath, sides)
+function cams = openDinoLiteCameras(dllPath, sides, assignPorts, confirmMsg)
 % OPENDINOLITECAMERAS  Oeffnet die gewuenschten Dino-Lite-Kameras mit fester
 % Links/Rechts-Zuordnung ueber den USB-Portpfad, beschriftet die Vorschau-
 % fenster mit LINKS / RECHTS und schaltet die LEDs aus. Die Funktion kehrt
@@ -1242,6 +1427,20 @@ function cams = openDinoLiteCameras(dllPath, sides)
     dllPath = string(dllPath);
     if nargin < 2 || isempty(sides), sides = ["LINKS","RECHTS"]; end
     sides = upper(string(sides));
+    if nargin < 3, assignPorts = []; end
+    if nargin < 4 || strlength(string(confirmMsg)) == 0, confirmMsg = ""; end
+
+    % Gespeicherte Kamera-Zuweisung (Wizard) hat Vorrang vor den fest
+    % hinterlegten idaKeys: Der zugewiesene USB-Port bestimmt, welche physische
+    % Kamera LINKS/RECHTS ist (winvideo-Index wird weiterhin dynamisch ermittelt).
+    if ~isempty(assignPorts)
+        if isfield(assignPorts,'cam1') && strlength(string(assignPorts.cam1)) > 0
+            CONFIG(1).idaKey = string(assignPorts.cam1);   % Kamera 1 (links)
+        end
+        if isfield(assignPorts,'cam2') && strlength(string(assignPorts.cam2)) > 0
+            CONFIG(2).idaKey = string(assignPorts.cam2);   % Kamera 2 (rechts)
+        end
+    end
 
     % Nur die angeforderten Seiten aus der Konfiguration verwenden
     CONFIG = CONFIG(ismember([CONFIG.side], sides));
@@ -1380,7 +1579,9 @@ function cams = openDinoLiteCameras(dllPath, sides)
     %% 6) Auf Scharfstellung warten - haelt die Vorschauen aktiv --------
     pause(0.5); drawnow;
     fprintf("\nWarte auf Bestaetigung der Scharfstellung...\n");
-    if numel(CONFIG) == 1
+    if strlength(confirmMsg) > 0
+        frage = char(confirmMsg);
+    elseif numel(CONFIG) == 1
         if CONFIG(1).side == "LINKS"
             frage = 'Ist Kamera 1 (links) scharf gestellt?';
         else
@@ -1418,6 +1619,57 @@ function key = extractPortKey(ida)
 % "...mi_00#6&d82dd4a&0&0000#{guid}..." -> "6&d82dd4a&0&0000"
     tok = regexp(lower(ida), 'mi_\d+#(.*?)#\{', 'tokens', 'once');
     if isempty(tok), key = lower(ida); else, key = string(tok{1}); end
+end
+
+function [winList, dinoIDs, dinoPorts] = dinoWinvideoMap(dllPath)
+% DINOWINVIDEOMAP  Ermittelt alle winvideo-Kameras und ordnet den Dino-Lites
+% ihren USB-Port-Pfad zu (ueber die DNX64-Reihenfolge).
+%   winList   - struct-Array .id (winvideo-ID) .name (Geraetename), ALLE Kameras
+%   dinoIDs   - sortierte winvideo-IDs der Dino-Lites
+%   dinoPorts - zugehoerige USB-Port-Pfade (gleiche Reihenfolge wie dinoIDs);
+%               leer/"" wenn die Zuordnung nicht moeglich war (Anzahl passt nicht)
+    if nargin < 1 || strlength(string(dllPath)) == 0, dllPath = "DNX64.dll"; end
+    winList = struct('id', {}, 'name', {});
+    try
+        info = imaqhwinfo('winvideo');
+        for k = 1:numel(info.DeviceInfo)
+            winList(k).id   = info.DeviceInfo(k).DeviceID;        %#ok<AGROW>
+            winList(k).name = string(info.DeviceInfo(k).DeviceName);
+        end
+    catch
+    end
+
+    % DNX64-Port-Pfade in DNX64-Index-Reihenfolge
+    keys = strings(1, 0);
+    try
+        if ~libisloaded('DNX64')
+            loadlibrary(char(string(dllPath)), 'DNX64forMatlab.h', 'alias', 'DNX64');
+        end
+        calllib('DNX64','SetVideoDeviceIndex', 0); pause(0.1);
+        n = calllib('DNX64','GetVideoDeviceCount');
+        keys = strings(1, n);
+        for idx = 0:n-1
+            calllib('DNX64','SetVideoDeviceIndex', idx); pause(0.1);
+            keys(idx+1) = extractPortKey(string(calllib('DNX64','GetDeviceIDA', idx)));
+        end
+    catch
+    end
+
+    % Dino-Lite-winvideo-IDs (Webcam per Name herausfiltern), sortiert
+    dinoIDs = [];
+    for k = 1:numel(winList)
+        if contains(lower(winList(k).name), "dino")
+            dinoIDs(end+1) = winList(k).id; %#ok<AGROW>
+        end
+    end
+    dinoIDs = sort(dinoIDs);
+
+    % Zuordnung sortierte Dino-winvideo-Reihenfolge <-> DNX64-Reihenfolge
+    if numel(dinoIDs) == numel(keys) && ~isempty(dinoIDs)
+        dinoPorts = keys;
+    else
+        dinoPorts = strings(1, numel(dinoIDs));   % keine Zuordnung moeglich
+    end
 end
 
 function [vals, units, ok, raw] = getHH806Temp(portOrObj, closeAfter)
