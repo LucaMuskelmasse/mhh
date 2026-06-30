@@ -54,6 +54,7 @@ useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
 stopTrun  = 70;         % Stopp-Temperatur Aufwaermen: Ende, wenn BEIDE Kanaele >= Wert
 stopCrun  = 37;         % Stopp-Temperatur Abkuehlen:  Ende, wenn BEIDE Kanaele <= Wert
+coolActRun = 80;        % Abkuehlvorgang automatisch aktivieren, wenn BEIDE Kanaele >= Wert
 dbOnRun     = true;     % Deadband (Programmablaufplan) in diesem Lauf aktiv?
 dbWarmEdges = [-Inf, 25, 70, Inf];  % Aufwaermen: Segmentgrenzen [°C]
 dbWarmVals  = [1, 0.1, 1];          % Aufwaermen: Deadband je Segment [°C]
@@ -83,9 +84,9 @@ gLeft.Scrollable    = 'on';
 
 % --- Parameter-Panel ---
 pnlParam = uipanel(gLeft, 'Title','Parameter');
-gP = uigridlayout(pnlParam, [15 3]);
+gP = uigridlayout(pnlParam, [16 3]);
 gP.ColumnWidth = {120, '1x', 32};
-gP.RowHeight   = repmat({'fit'}, 1, 15);
+gP.RowHeight   = repmat({'fit'}, 1, 16);
 
 uilabel(gP, 'Text','COM-Port:');
 % Zuletzt benutzten Port (falls gemerkt) als Vorauswahl laden
@@ -131,6 +132,13 @@ edtStopC = uieditfield(gP, 'numeric', 'Value',37, ...
     'Tooltip',['Abkuehlvorgang: Lauf stoppt automatisch, wenn BEIDE ' ...
                'Kanaele <= diesem Wert sind.']);
 edtStopC.Layout.Column = [2 3];
+
+uilabel(gP, 'Text','Abkühlen ab [°C]:');
+edtCoolAct = uieditfield(gP, 'numeric', 'Value',80, ...
+    'Tooltip',['Der Abkuehlvorgang wird automatisch aktiviert, sobald BEIDE ' ...
+               'Kanaele >= diesem Wert sind (alternativ jederzeit per ' ...
+               'Knopf ''Abkühlvorgang'').']);
+edtCoolAct.Layout.Column = [2 3];
 
 uilabel(gP, 'Text','Kameras:');
 ddCams = uidropdown(gP, ...
@@ -252,7 +260,7 @@ syncDbFields();
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
 lockables = [ddCom, btnPorts, btnFindThermo, edtInt, edtStopT, edtStopC, ...
-             chkDb, tblDbWarm, btnWarmAdd, btnWarmDel, tblDbCool, btnCoolAdd, ...
+             edtCoolAct, chkDb, tblDbWarm, btnWarmAdd, btnWarmDel, tblDbCool, btnCoolAdd, ...
              btnCoolDel, ddCams, edtBase, edtDatum, edtInlay1, ddMuster1, ...
              ddForm1, edtInlay2, ddMuster2, ddForm2, btnBrowseBase];
 
@@ -477,6 +485,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             intervall = edtInt.Value;
             stopTrun  = edtStopT.Value;
             stopCrun  = edtStopC.Value;
+            coolActRun = edtCoolAct.Value;
             dbOnRun    = logical(chkDb.Value);
             % Programmablaufplaene (Aufwaermen/Abkuehlen) einfrieren.
             [dbWarmEdges, dbWarmVals] = dbFreeze(tblDbWarm);
@@ -581,6 +590,7 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                 "Intervall [s];"       + strrep(sprintf('%.2f', intervall), '.', ','); ...
                 "Stopp Aufwaermen [Grad C];" + n1(stopTrun); ...
                 "Stopp Abkuehlen [Grad C];"  + n1(stopCrun); ...
+                "Abkuehlen ab [Grad C];"     + n1(coolActRun); ...
                 dbLines; ...
                 "Kameras;"             + camLabel(); ...
                 "Datum;"               + datum; ...
@@ -686,9 +696,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             else
                 dbInfo = 'Deadband inaktiv (ueberall 0.1-Grad-Schritte)';
             end
-            logMsg(sprintf(['Lauf gestartet (Intervall %.2f s, ' ...
-                            'Stopp Aufw. %.1f °C, Stopp Abk. %.1f °C, %s, Kameras: %s).'], ...
-                           intervall, stopTrun, stopCrun, dbInfo, camLabel()));
+            logMsg(sprintf(['Lauf gestartet (Intervall %.2f s, Stopp Aufw. %.1f °C, ' ...
+                            'Stopp Abk. %.1f °C, Abkuehlen ab %.1f °C, %s, Kameras: %s).'], ...
+                           intervall, stopTrun, stopCrun, coolActRun, dbInfo, camLabel()));
         catch ME
             logMsg("Start fehlgeschlagen: " + string(ME.message));
             cleanupResources();
@@ -765,6 +775,13 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
                     vals(1), uL, vals(2), uR, stopCrun));
                 onStop();
                 return;
+            end
+
+            % --- Abkuehlvorgang automatisch aktivieren (beim Aufwaermen) ---
+            if ~cooling && vals(1) >= coolActRun && vals(2) >= coolActRun
+                logMsg(sprintf("Abkuehlschwelle %.1f °C erreicht — Abkuehlvorgang wird automatisch aktiviert.", coolActRun));
+                btnCool.Value = true;
+                onCool();
             end
 
             % --- Ausloeselogik ---
@@ -945,10 +962,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
 
     function dbFitHeight(tbl, gridRow)
         % Hoehe der Tabellen-Zeile im Panel-Grid an die Zeilenzahl anpassen,
-        % damit unter der Tabelle keine leere (helle) Flaeche bleibt.
+        % damit weder ein Scrollbalken noch eine leere helle Flaeche bleibt.
         n = size(tbl.Data, 1);
         rh = gD.RowHeight;
-        rh{gridRow} = 24 * (n + 1);       % Kopfzeile + n Datenzeilen (ca. 24 px)
+        rh{gridRow} = 32 + 26*n;          % Kopfzeile (~32) + n Datenzeilen (~26)
         gD.RowHeight = rh;
     end
 
