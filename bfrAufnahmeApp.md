@@ -478,7 +478,9 @@ gekapselt, ändern das Verhalten in MATLAB selbst nicht):
 1. **`loadDNX64(dllPath)`** statt direktem `loadlibrary(...,'DNX64forMatlab.h',...)`:
    `loadlibrary` kann in einer `.exe` keinen C-Header parsen → im deployten Modus
    wird die vom Build erzeugte **Prototyp-Datei `DNX64_proto.m`** (+ Thunk-DLL)
-   genutzt. Die DLL wird über `ctfroot`/`which` gesucht.
+   genutzt. Die DLL wird bevorzugt im **installierten** Dino-Lite-/DNX64-Ordner
+   gesucht (wegen ihrer abhängigen DLLs, siehe Kasten unten), sonst über
+   `ctfroot`/`which`.
 2. **`camAssign.mat`** liegt im deployten Modus unter `%APPDATA%\bfrAufnahmeApp\`
    (der Skript-/Paketordner ist dort schreibgeschützt).
 3. **`uiwait(fig)`** am Ende der Hauptfunktion (nur deployed) hält die App offen —
@@ -488,6 +490,19 @@ Das Build-Skript erzeugt den Prototyp automatisch, packt DLL/Header/Prototyp/Thu
 per `AdditionalFiles` ein und ruft `compiler.build.standaloneApplication`. Für eine
 Installer-Variante, die die Runtime mitbringt: `compiler.package.installer(results)`
 oder die App „Application Compiler" (`deploytool`).
+
+**Wichtig — `DNX64.dll`-Abhängigkeiten in der `.exe`:** `DNX64.dll` benötigt
+abhängige DLLs, die im **Dino-Lite-/DNX64-Installationsordner** neben ihr liegen.
+Die ins CTF gepackte „nackte" Kopie lädt deshalb in der `.exe` mit dem Fehler
+*„Das angegebene Modul wurde nicht gefunden"* (in MATLAB klappt es, weil dort der
+System-`PATH`/MATLAB-`bin` die Abhängigkeiten liefert). Daher lädt `loadDNX64` im
+deployten Modus die **installierte** `DNX64.dll` (sucht u.a.
+`C:\Program Files\DNX64`, `…\Dino-Lite\DinoCapture 2.0`) und legt deren Ordner auf
+den `PATH`, damit Windows die abhängigen DLLs findet. Findet der Automatismus den
+Ordner nicht, die Umgebungsvariable **`DNX64_DIR`** auf den Ordner der installierten
+`DNX64.dll` setzen. Voraussetzung am Ziel-PC bleibt also: **Dino-Lite-Software /
+DNX64-SDK installiert** (nicht nur die Treiber). Die `[Diagnose]`-Zeilen im Logfile
+(Knopf „Kameras zuweisen") zeigen, ob DNX64 lädt und aus welchem Ordner.
 
 **Nicht getestet** (keine Live-MATLAB-Umgebung beim Erstellen): Deployment von
 `loadlibrary`+Custom-DLL ist erfahrungsgemäß fummelig; ggf. sind auf der

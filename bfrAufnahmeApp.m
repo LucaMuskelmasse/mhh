@@ -1636,7 +1636,7 @@ function key = extractPortKey(ida)
     if isempty(tok), key = lower(ida); else, key = string(tok{1}); end
 end
 
-function loadDNX64(dllPath)
+function loadedDll = loadDNX64(dllPath)
 % LOADDNX64  Laedt die DNX64-Bibliothek (Alias 'DNX64'), falls noch nicht geladen.
 % In MATLAB ueber den C-Header; in einer kompilierten .exe (isdeployed) ueber
 % die vorab erzeugte Prototyp-Datei DNX64_proto.m + Thunk — denn loadlibrary
@@ -1648,17 +1648,45 @@ function loadDNX64(dllPath)
     useProto = isdeployed || exist('DNX64_proto','file') == 2;
 
     % --- DNX64.dll lokalisieren -------------------------------------------
+    % WICHTIG (.exe): DNX64.dll hat ABHAENGIGE DLLs, die im Dino-Lite-
+    % Installationsordner neben ihr liegen. Die ins CTF gepackte "nackte"
+    % Kopie laedt deshalb mit "Modul nicht gefunden" (die Abhaengigkeiten
+    % fehlen). In MATLAB klappt es, weil dort der System-PATH / MATLAB-bin
+    % die Abhaengigkeiten liefert. Loesung: die INSTALLIERTE DNX64.dll
+    % bevorzugen und ihren Ordner auf den PATH legen, damit Windows die
+    % abhaengigen DLLs findet.
     dll = char(string(dllPath));
-    if ~isfile(dll)
-        cand = {fullfile(ctfroot,'DNX64.dll'), which('DNX64.dll'), ...
-                fullfile(pwd,'DNX64.dll'), 'DNX64.dll'};
-        for c = cand
-            if ~isempty(c{1}) && isfile(c{1}), dll = c{1}; break; end
+    instDirs = { getenv('DNX64_DIR'), ...
+        'C:\Program Files\DNX64', 'C:\Program Files (x86)\DNX64', ...
+        'C:\Program Files\Dino-Lite\DinoCapture 2.0', ...
+        'C:\Program Files (x86)\Dino-Lite\DinoCapture 2.0', ...
+        'C:\Program Files\AnMo\DinoCapture 2.0', ...
+        'C:\Program Files (x86)\AnMo\DinoCapture 2.0' };
+    cand = {};
+    if isdeployed
+        % Im Deploy-Modus zuerst die installierten Kopien (mit Abhaengigkeiten)
+        for d = instDirs
+            if ~isempty(d{1}), cand{end+1} = fullfile(d{1}, 'DNX64.dll'); end %#ok<AGROW>
         end
     end
-    if ~isfile(dll) && ~strcmp(dll,'DNX64.dll')
-        error('DNX64:dllNotFound', 'DNX64.dll nicht gefunden (gesucht: %s).', dll);
+    cand = [cand, {dll, fullfile(ctfroot,'DNX64.dll'), which('DNX64.dll'), ...
+                   fullfile(pwd,'DNX64.dll'), 'DNX64.dll'}];
+    dll = '';
+    for c = cand
+        if ~isempty(c{1}) && isfile(c{1}), dll = c{1}; break; end
     end
+    if isempty(dll)
+        error('DNX64:dllNotFound', ['DNX64.dll nicht gefunden. Setze die ' ...
+            'Umgebungsvariable DNX64_DIR auf den Ordner der installierten ' ...
+            'DNX64.dll (z.B. den Dino-Lite-/DNX64-Installationsordner).']);
+    end
+    % Den Ordner der DLL auf den PATH legen -> Windows findet ihre
+    % abhaengigen DLLs beim Laden (behebt "Modul nicht gefunden" in der .exe).
+    dllDir = fileparts(dll);
+    if ~isempty(dllDir)
+        try, setenv('PATH', [dllDir pathsep getenv('PATH')]); catch, end
+    end
+    loadedDll = dll;
 
     if ~useProto
         loadlibrary(dll, 'DNX64forMatlab.h', 'alias', 'DNX64');
@@ -1724,8 +1752,8 @@ function [winList, dinoIDs, dinoPorts, diag] = dinoWinvideoMap(dllPath)
     % DNX64-Port-Pfade in DNX64-Index-Reihenfolge
     keys = strings(1, 0);
     try
-        loadDNX64(dllPath);
-        diag(end+1) = "DNX64 geladen.";
+        usedDll = loadDNX64(dllPath);
+        diag(end+1) = "DNX64 geladen aus: " + string(usedDll);
         calllib('DNX64','SetVideoDeviceIndex', 0); pause(0.1);
         n = calllib('DNX64','GetVideoDeviceCount');
         diag(end+1) = sprintf("DNX64 GetVideoDeviceCount = %d", n);
