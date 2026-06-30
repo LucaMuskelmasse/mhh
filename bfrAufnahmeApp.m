@@ -54,9 +54,11 @@ useL      = true;       % linke Kamera in diesem Lauf aktiv
 useR      = true;       % rechte Kamera in diesem Lauf aktiv
 stopTrun  = 70;         % Stopp-Temperatur Aufwaermen: Ende, wenn BEIDE Kanaele >= Wert
 stopCrun  = 37;         % Stopp-Temperatur Abkuehlen:  Ende, wenn BEIDE Kanaele <= Wert
-dbOnRun    = true;      % Deadband (Programmablaufplan) in diesem Lauf aktiv?
-dbEdgesRun = [-Inf, 25, 70, Inf];  % Segmentgrenzen [°C] (N+1 Werte)
-dbValsRun  = [1, 0.1, 1];          % Deadband je Segment [°C] (N Werte)
+dbOnRun     = true;     % Deadband (Programmablaufplan) in diesem Lauf aktiv?
+dbWarmEdges = [-Inf, 25, 70, Inf];  % Aufwaermen: Segmentgrenzen [°C]
+dbWarmVals  = [1, 0.1, 1];          % Aufwaermen: Deadband je Segment [°C]
+dbCoolEdges = [-Inf, Inf];          % Abkuehlen:  Segmentgrenzen [°C]
+dbCoolVals  = 1;                    % Abkuehlen:  Deadband je Segment [°C]
 
 %% ================================ UI-Aufbau =====================================
 fig = uifigure('Name','BFR-Versuch — Aufnahmesteuerung', ...
@@ -190,9 +192,12 @@ ddForm2.Layout.Column = [2 3];
 syncInlayFields();
 
 % --- Programmablaufplan-Panel (temperaturabhaengiges Deadband) ---
+% Zwei Tabellen: getrennt fuer Aufwaerm- und Abkuehlvorgang. Spalten Start,
+% Ende, Deadband (alle in °C). Start fest -inf in Zeile 1, Ende fest inf in
+% der letzten Zeile; Ende und Deadband editierbar, Start folgt automatisch.
 pnlDb = uipanel(gLeft, 'Title','Programmablaufplan (Deadband)');
-gD = uigridlayout(pnlDb, [3 2]);
-gD.RowHeight   = {'fit', 132, 'fit'};
+gD = uigridlayout(pnlDb, [7 2]);
+gD.RowHeight   = {'fit','fit', 96, 'fit', 'fit', 48, 'fit'};
 gD.ColumnWidth = {'1x','1x'};
 
 chkDb = uicheckbox(gD, 'Text','Deadband aktiv', 'Value',true, ...
@@ -202,33 +207,54 @@ chkDb = uicheckbox(gD, 'Text','Deadband aktiv', 'Value',true, ...
     'ValueChangedFcn', @(~,~) syncDbFields());
 chkDb.Layout.Row = 1;  chkDb.Layout.Column = [1 2];
 
-tblDb = uitable(gD, ...
-    'ColumnName',     {'Start','Ende','Deadband'}, ...
-    'ColumnEditable', [false true true], ...
-    'ColumnFormat',   {'numeric','numeric','numeric'}, ...
-    'Data',           [-Inf 25 1; 25 70 0.1; 70 Inf 1], ...
-    'CellEditCallback', @onDbEdit, ...
-    'Tooltip',        ['Temperaturabschnitte und ihr Deadband (°C). Start ist ' ...
-                       'fest -inf in Zeile 1, Ende fest inf in der letzten ' ...
-                       'Zeile. Ende und Deadband editierbar; Start folgt ' ...
-                       'automatisch dem Ende der Zeile darueber.']);
-tblDb.Layout.Row = 2;  tblDb.Layout.Column = [1 2];
+dbTblTip = ['Temperaturabschnitte und ihr Deadband (°C). Start ist fest ' ...
+            '-Inf in Zeile 1, Ende fest Inf in der letzten Zeile. Ende und ' ...
+            'Deadband editierbar; Start folgt automatisch dem Ende darueber.'];
 
-btnDbAdd = uibutton(gD, 'Text','+  Zeile', 'Tooltip','Abschnitt hinzufuegen', ...
-                    'ButtonPushedFcn', @(~,~) dbAddRow());
-btnDbAdd.Layout.Row = 3;  btnDbAdd.Layout.Column = 1;
-btnDbDel = uibutton(gD, 'Text','−  Zeile', 'Tooltip','Letzten Abschnitt entfernen', ...
-                    'ButtonPushedFcn', @(~,~) dbDelRow());
-btnDbDel.Layout.Row = 3;  btnDbDel.Layout.Column = 2;
+lblWarm = uilabel(gD, 'Text','Aufwärmvorgang:', 'FontWeight','bold');
+lblWarm.Layout.Row = 2;  lblWarm.Layout.Column = [1 2];
 
-% Tabelle/Buttons passend zum Haekchen aktivieren/sperren (Initialzustand)
+tblDbWarm = uitable(gD, 'ColumnName',{'Start','Ende','Deadband'}, ...
+    'ColumnEditable',[false true true], ...
+    'ColumnFormat',{'numeric','numeric','char'}, ...
+    'Data',{-Inf, 25, '1.0'; 25, 70, '0.1'; 70, Inf, '1.0'}, ...
+    'CellEditCallback', @onDbEdit, 'Tooltip', dbTblTip);
+tblDbWarm.Layout.Row = 3;  tblDbWarm.Layout.Column = [1 2];
+
+btnWarmAdd = uibutton(gD, 'Text','+  Zeile', 'Tooltip','Abschnitt hinzufuegen', ...
+                      'ButtonPushedFcn', @(~,~) dbAddRow(tblDbWarm, 3));
+btnWarmAdd.Layout.Row = 4;  btnWarmAdd.Layout.Column = 1;
+btnWarmDel = uibutton(gD, 'Text','−  Zeile', 'Tooltip','Letzten Abschnitt entfernen', ...
+                      'ButtonPushedFcn', @(~,~) dbDelRow(tblDbWarm, 3));
+btnWarmDel.Layout.Row = 4;  btnWarmDel.Layout.Column = 2;
+
+lblCool = uilabel(gD, 'Text','Abkühlvorgang:', 'FontWeight','bold');
+lblCool.Layout.Row = 5;  lblCool.Layout.Column = [1 2];
+
+tblDbCool = uitable(gD, 'ColumnName',{'Start','Ende','Deadband'}, ...
+    'ColumnEditable',[false true true], ...
+    'ColumnFormat',{'numeric','numeric','char'}, ...
+    'Data',{-Inf, Inf, '1.0'}, ...
+    'CellEditCallback', @onDbEdit, 'Tooltip', dbTblTip);
+tblDbCool.Layout.Row = 6;  tblDbCool.Layout.Column = [1 2];
+
+btnCoolAdd = uibutton(gD, 'Text','+  Zeile', 'Tooltip','Abschnitt hinzufuegen', ...
+                      'ButtonPushedFcn', @(~,~) dbAddRow(tblDbCool, 6));
+btnCoolAdd.Layout.Row = 7;  btnCoolAdd.Layout.Column = 1;
+btnCoolDel = uibutton(gD, 'Text','−  Zeile', 'Tooltip','Letzten Abschnitt entfernen', ...
+                      'ButtonPushedFcn', @(~,~) dbDelRow(tblDbCool, 6));
+btnCoolDel.Layout.Row = 7;  btnCoolDel.Layout.Column = 2;
+
+% Tabellenhoehen an Zeilenzahl anpassen + passend zum Haekchen aktivieren
+dbFitHeight(tblDbWarm, 3);
+dbFitHeight(tblDbCool, 6);
 syncDbFields();
 
 % Alle waehrend eines Laufs zu sperrenden Bedienelemente
 lockables = [ddCom, btnPorts, btnFindThermo, edtInt, edtStopT, edtStopC, ...
-             chkDb, tblDb, btnDbAdd, btnDbDel, ddCams, ...
-             edtBase, edtDatum, edtInlay1, ddMuster1, ddForm1, edtInlay2, ...
-             ddMuster2, ddForm2, btnBrowseBase];
+             chkDb, tblDbWarm, btnWarmAdd, btnWarmDel, tblDbCool, btnCoolAdd, ...
+             btnCoolDel, ddCams, edtBase, edtDatum, edtInlay1, ddMuster1, ...
+             ddForm1, edtInlay2, ddMuster2, ddForm2, btnBrowseBase];
 
 % --- Steuerungs-Panel (Start/Stop/Status) ---
 pnlCtrl = uipanel(gLeft, 'Title','Steuerung');
@@ -452,12 +478,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             stopTrun  = edtStopT.Value;
             stopCrun  = edtStopC.Value;
             dbOnRun    = logical(chkDb.Value);
-            % Programmablaufplan einfrieren: Grenzen [-inf, b1, ..., inf] und
-            % Deadband je Segment.
-            dbData     = tblDb.Data;
-            dbData     = dbNormalize(dbData);        % Start-Spalte/inf absichern
-            dbEdgesRun = [dbData(1,1); dbData(:,2)]';   % 1 x (N+1)
-            dbValsRun  = dbData(:,3)';                  % 1 x N
+            % Programmablaufplaene (Aufwaermen/Abkuehlen) einfrieren.
+            [dbWarmEdges, dbWarmVals] = dbFreeze(tblDbWarm);
+            [dbCoolEdges, dbCoolVals] = dbFreeze(tblDbCool);
             baseDir   = strtrim(string(edtBase.Value));
             datum     = strtrim(string(edtDatum.Value));
             inlay1    = regexprep(strtrim(string(edtInlay1.Value)), '^(MV|mv)', '');
@@ -483,10 +506,8 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             prefixRun = erase(datum, "-");
 
             if dbOnRun
-                assert(all(diff(dbEdgesRun) > 0), ...
-                       "Programmablaufplan: Grenzen muessen streng aufsteigend sein (Start < Ende).");
-                assert(all(dbValsRun > 0) && ~any(isnan(dbValsRun)), ...
-                       "Programmablaufplan: alle Deadband-Werte muessen > 0 sein.");
+                dbValidate(dbWarmEdges, dbWarmVals, "Aufwaermen");
+                dbValidate(dbCoolEdges, dbCoolVals, "Abkuehlen");
             end
             % Nur die Inlays der aktiven Seite(n) sind Pflicht
             if useL
@@ -549,14 +570,10 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             fTxt1 = string(ddForm1.Items{strcmp(string(ddForm1.ItemsData), form1)});
             mTxt2 = string(ddMuster2.Items{strcmp(string(ddMuster2.ItemsData), muster2)});
             fTxt2 = string(ddForm2.Items{strcmp(string(ddForm2.ItemsData), form2)});
-            % Programmablaufplan (Deadband) als CSV-Zeilen aufbereiten
-            gv = @(x) string(strrep(sprintf('%g', x), '.', ','));   % Deadband -> Komma
-            dbLines = "Deadband aktiv;" + jaNein(dbOnRun);
-            for kSeg = 1:numel(dbValsRun)
-                dbLines(end+1) = "Deadband Abschnitt " + kSeg + ";" + ...
-                    edgeStr(dbEdgesRun(kSeg)) + " .. " + edgeStr(dbEdgesRun(kSeg+1)) + ...
-                    " -> " + gv(dbValsRun(kSeg)); %#ok<AGROW>
-            end
+            % Programmablaufplaene (Deadband) als CSV-Zeilen aufbereiten
+            dbLines = ["Deadband aktiv;" + jaNein(dbOnRun), ...
+                       dbSegLines("Aufwaermen", dbWarmEdges, dbWarmVals), ...
+                       dbSegLines("Abkuehlen",  dbCoolEdges, dbCoolVals)];
             dbLines = dbLines(:);                          % Spaltenvektor
             paramLines = [ ...
                 "Parameter;Wert"; ...
@@ -663,8 +680,9 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             lamp.Color     = [0 0.8 0];
             lblState.Text  = 'läuft (Aufwärmen)';
             if dbOnRun
-                dbInfo = sprintf('Deadband: %d Abschnitt(e) laut Programmablaufplan', ...
-                                 numel(dbValsRun));
+                dbInfo = sprintf(['Deadband: %d Abschnitt(e) Aufwaermen / ' ...
+                                  '%d Abschnitt(e) Abkuehlen'], ...
+                                 numel(dbWarmVals), numel(dbCoolVals));
             else
                 dbInfo = 'Deadband inaktiv (ueberall 0.1-Grad-Schritte)';
             end
@@ -865,63 +883,99 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
     end
 
     function syncDbFields()
-        % Aktiviert/sperrt die Programmablaufplan-Tabelle + Buttons passend
+        % Aktiviert/sperrt beide Programmablaufplan-Tabellen + Buttons passend
         % zum Haekchen. Inhalt bleibt erhalten (nur Enable wird umgeschaltet).
         if chkDb.Value, st = 'on'; else, st = 'off'; end
-        tblDb.Enable = st;  btnDbAdd.Enable = st;  btnDbDel.Enable = st;
+        tblDbWarm.Enable = st;  btnWarmAdd.Enable = st;  btnWarmDel.Enable = st;
+        tblDbCool.Enable = st;  btnCoolAdd.Enable = st;  btnCoolDel.Enable = st;
     end
 
     % ----------------------------------------------- Programmablaufplan-Helfer ---
-    function onDbEdit(~, ev)
-        % Reaktion auf Zellbearbeitung der Deadband-Tabelle: Deadband > 0
-        % erzwingen, letztes Ende fest auf inf halten und die Start-Spalte aus
-        % den Ende-Werten der Zeilen darueber neu ableiten.
-        d = tblDb.Data;
+    function onDbEdit(src, ev)
+        % Reaktion auf Zellbearbeitung einer Deadband-Tabelle (src = Tabelle):
+        % Deadband auf 1 Nachkommastelle + > 0 normieren, letztes Ende fest auf
+        % Inf halten und die Start-Spalte aus den Ende-Werten neu ableiten.
+        d = src.Data;
         r = ev.Indices(1);  c = ev.Indices(2);
-        if c == 3 && (~(d(r,3) > 0) || isnan(d(r,3)))   % ungueltiges Deadband
-            d(r,3) = ev.PreviousData;
+        if c == 3                                       % Deadband-Spalte (char)
+            v = str2double(strrep(string(d{r,3}), ',', '.'));
+            if isnan(v) || v <= 0
+                d{r,3} = ev.PreviousData;               % ungueltig -> zurueck
+            else
+                d{r,3} = sprintf('%.1f', v);            % 1 Nachkommastelle
+            end
         end
-        if c == 2 && r == size(d,1)                     % letztes Ende bleibt inf
-            d(r,2) = Inf;
+        if c == 2 && r == size(d,1)                     % letztes Ende bleibt Inf
+            d{r,2} = Inf;
         end
-        tblDb.Data = dbNormalize(d);
+        src.Data = dbNormalize(d);
     end
 
     function d = dbNormalize(d)
-        % Start(1)=-inf, Ende(letzte)=inf, Start(i)=Ende(i-1).
+        % d = Cell-Array {Start(num), Ende(num), Deadband(char)}.
+        % Start(1)=-Inf, Ende(letzte)=Inf, Start(i)=Ende(i-1).
         n = size(d,1);
-        d(1,1) = -Inf;  d(n,2) = Inf;
-        for i = 2:n, d(i,1) = d(i-1,2); end
+        d{1,1} = -Inf;  d{n,2} = Inf;
+        for i = 2:n, d{i,1} = d{i-1,2}; end
     end
 
-    function dbAddRow()
+    function dbAddRow(tbl, gridRow)
         % Haengt einen Abschnitt an: neuer Schnittpunkt = bisherige untere
-        % Grenze der letzten Zeile + 10 (bzw. 25, falls -inf).
-        d = tblDb.Data;  n = size(d,1);
-        z = d(n,1) + 10;
+        % Grenze der letzten Zeile + 10 (bzw. 25, falls -Inf).
+        d = tbl.Data;  n = size(d,1);
+        z = d{n,1} + 10;
         if ~isfinite(z), z = 25; end
-        d(n,2) = z;                       % bisher letzte Zeile endet jetzt bei z
-        d = [d; z, Inf, 1];               % neuer Abschnitt z..inf mit Deadband 1
-        tblDb.Data = dbNormalize(d);
+        d{n,2} = z;                       % bisher letzte Zeile endet jetzt bei z
+        d = [d; {z, Inf, '1.0'}];         % neuer Abschnitt z..Inf, Deadband 1.0
+        tbl.Data = dbNormalize(d);
+        dbFitHeight(tbl, gridRow);
     end
 
-    function dbDelRow()
+    function dbDelRow(tbl, gridRow)
         % Entfernt den letzten Abschnitt (mind. eine Zeile bleibt erhalten).
-        d = tblDb.Data;
+        d = tbl.Data;
         if size(d,1) <= 1
             logMsg("Programmablaufplan: mindestens eine Zeile erforderlich.");
             return;
         end
         d(end,:) = [];
-        tblDb.Data = dbNormalize(d);
+        tbl.Data = dbNormalize(d);
+        dbFitHeight(tbl, gridRow);
+    end
+
+    function dbFitHeight(tbl, gridRow)
+        % Hoehe der Tabellen-Zeile im Panel-Grid an die Zeilenzahl anpassen,
+        % damit unter der Tabelle keine leere (helle) Flaeche bleibt.
+        n = size(tbl.Data, 1);
+        rh = gD.RowHeight;
+        rh{gridRow} = 24 * (n + 1);       % Kopfzeile + n Datenzeilen (ca. 24 px)
+        gD.RowHeight = rh;
+    end
+
+    function [edges, vals] = dbFreeze(tbl)
+        % Tabelle in numerische Grenzen [-Inf..Inf] und Deadbands umwandeln.
+        d = dbNormalize(tbl.Data);
+        edges = [d{1,1}, d{:,2}];                         % 1 x (N+1)
+        vals  = cellfun(@(s) str2double(strrep(string(s),',','.')), d(:,3))';  % 1 x N
+    end
+
+    function dbValidate(edges, vals, which)
+        % Prueft einen Programmablaufplan beim Start.
+        assert(all(diff(edges) > 0), ...
+            "Programmablaufplan " + which + ": Grenzen muessen streng aufsteigend sein (Start < Ende).");
+        assert(all(vals > 0) && ~any(isnan(vals)), ...
+            "Programmablaufplan " + which + ": alle Deadband-Werte muessen > 0 sein.");
     end
 
     function step = deadbandFor(T)
-        % Deadband fuer Temperatur T anhand der eingefrorenen Abschnitte.
-        if isnan(T), step = dbValsRun(end); return; end
-        seg = find(T < dbEdgesRun(2:end), 1);   % erster Abschnitt mit Obergrenze > T
-        if isempty(seg), seg = numel(dbValsRun); end
-        step = dbValsRun(seg);
+        % Deadband fuer Temperatur T anhand der eingefrorenen Abschnitte,
+        % je nach Modus (Aufwaermen/Abkuehlen).
+        if cooling, edges = dbCoolEdges; vals = dbCoolVals;
+        else,       edges = dbWarmEdges; vals = dbWarmVals; end
+        if isnan(T), step = vals(end); return; end
+        seg = find(T < edges(2:end), 1);   % erster Abschnitt mit Obergrenze > T
+        if isempty(seg), seg = numel(vals); end
+        step = vals(seg);
     end
 
     function s = edgeStr(x)
@@ -930,6 +984,16 @@ logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
             if x < 0, s = "-inf"; else, s = "inf"; end
         else
             s = string(strrep(sprintf('%g', x), '.', ','));
+        end
+    end
+
+    function lines = dbSegLines(label, edges, vals)
+        % CSV-Zeilen fuer einen Programmablaufplan (1 Zeile je Abschnitt).
+        lines = strings(1, numel(vals));
+        for k = 1:numel(vals)
+            lines(k) = "Deadband " + label + " Abschnitt " + k + ";" + ...
+                edgeStr(edges(k)) + " .. " + edgeStr(edges(k+1)) + ...
+                " -> " + string(strrep(sprintf('%g', vals(k)), '.', ','));
         end
     end
 
