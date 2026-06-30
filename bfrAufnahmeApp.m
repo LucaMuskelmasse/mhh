@@ -7,11 +7,12 @@ function bfrAufnahmeApp
 %   letzten Ausloesewert steigt (Geraeteaufloesung 0.1 °C -> ein Bild je
 %   0.1-Grad-Schritt).
 %
-%   Deadband ("Deadband aktiv", standardmaessig an): Das Inner Band
-%   (IB-Start..IB-End) ist der Feinbereich, in dem sich der Formgedaecht-
-%   niseffekt abspielt — hier loest schon der feine IB-Schritt ein Bild
-%   aus. Im Outer Band darunter/darueber genuegt erst eine Aenderung um
-%   den groberen OB-Schritt. Inaktiv: ueberall 0.1-Grad-Schritte.
+%   Deadband ("Deadband aktiv", standardmaessig an): Zwei editierbare
+%   Tabellen (Programmablaufplan, getrennt fuer Aufwaermen/Abkuehlen)
+%   legen temperaturabhaengig fest, um wie viel Grad sich die Temperatur
+%   seit dem letzten Bild aendern muss, bevor ausgeloest wird (feine
+%   Schritte im Formgedaechtnisbereich, grobe ausserhalb). Inaktiv:
+%   ueberall 0.1-Grad-Schritte. Details siehe bfrAufnahmeApp.md.
 %
 %   Mit dem Umschaltknopf "Abkühlvorgang" (waehrend des Laufs) wird die
 %   Ausloesung umgedreht: Es wird ein Foto gemacht, sobald die Temperatur
