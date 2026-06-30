@@ -21,6 +21,7 @@ Materials (Inlay) beim Aufwärmen und Abkühlen Bild für Bild dokumentiert.
 | `listKameras.m` | Diagnose: listet winvideo-Geräte (ID + Name) und DNX64-Port-Pfade auf. Hilft, die Kamera-`CONFIG` zu kalibrieren. |
 | `testKameras.m` | Diagnose: öffnet die Dino-Lites einzeln/gemeinsam **ohne** die App, um Geräte-/USB-Probleme vom App-Code zu trennen. |
 | `bfrAufnahmeApp.md` | Diese Dokumentation. |
+| `buildBfrAufnahmeApp.m` | Build-Skript: erstellt aus der App eine eigenständige Windows-`.exe` (§16). |
 | `camAssign.mat` | **Zur Laufzeit** erzeugt (neben dem Skript): gespeicherte Kamera-Zuweisung des Einrichtungs-Wizards (USB-Port-Pfad je Kamera). Nicht im Repo, maschinenspezifisch. |
 
 Die App ist **eigenständig**: Alle Hilfsfunktionen (`getHH806Temp`,
@@ -456,7 +457,45 @@ Button **„Kameras zuweisen …"** (`findCameras`):
 
 ---
 
-## 15. Git / Branch
+## 15. Eigenständige `.exe` bauen (`buildBfrAufnahmeApp.m`)
+
+Erstellt eine Windows-`.exe`, die beim Doppelklick direkt die GUI öffnet
+(läuft ohne MATLAB, nur mit der MATLAB Runtime).
+
+**Bauen (in MATLAB, mit Quellcode):**
+```matlab
+buildBfrAufnahmeApp            % ohne Icon
+buildBfrAufnahmeApp('icon.png')% mit eigenem Icon
+```
+Ergebnis: `bfrAufnahmeApp_exe\bfrAufnahmeApp.exe`.
+
+**Voraussetzungen:** MATLAB Compiler (Toolbox), `DNX64.dll` + `DNX64forMatlab.h`
+im Skriptordner, ein C-Compiler (`mex -setup`) für die einmalige Prototyp-Erzeugung.
+Ziel-PC: passende MATLAB Runtime + Dino-Lite-Treiber.
+
+**Drei deploy-spezifische Anpassungen im App-Code** (alle über `isdeployed`
+gekapselt, ändern das Verhalten in MATLAB selbst nicht):
+1. **`loadDNX64(dllPath)`** statt direktem `loadlibrary(...,'DNX64forMatlab.h',...)`:
+   `loadlibrary` kann in einer `.exe` keinen C-Header parsen → im deployten Modus
+   wird die vom Build erzeugte **Prototyp-Datei `DNX64_proto.m`** (+ Thunk-DLL)
+   genutzt. Die DLL wird über `ctfroot`/`which` gesucht.
+2. **`camAssign.mat`** liegt im deployten Modus unter `%APPDATA%\bfrAufnahmeApp\`
+   (der Skript-/Paketordner ist dort schreibgeschützt).
+3. **`uiwait(fig)`** am Ende der Hauptfunktion (nur deployed) hält die App offen —
+   sonst kehrt die Funktion sofort zurück und die `.exe` beendet sich.
+
+Das Build-Skript erzeugt den Prototyp automatisch, packt DLL/Header/Prototyp/Thunk
+per `AdditionalFiles` ein und ruft `compiler.build.standaloneApplication`. Für eine
+Installer-Variante, die die Runtime mitbringt: `compiler.package.installer(results)`
+oder die App „Application Compiler" (`deploytool`).
+
+**Nicht getestet** (keine Live-MATLAB-Umgebung beim Erstellen): Deployment von
+`loadlibrary`+Custom-DLL ist erfahrungsgemäß fummelig; ggf. sind auf der
+Zielmaschine ein bis zwei Iterationen nötig (siehe Build-Warnungen).
+
+---
+
+## 16. Git / Branch
 
 Entwicklung läuft auf Branch **`claude/lucid-brown-2rxlsq`**. Änderungen werden
 committet und gepusht; PR nur auf ausdrückliche Anfrage.

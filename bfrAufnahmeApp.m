@@ -65,7 +65,16 @@ dbCoolVals  = 1;                    % Abkuehlen:  Deadband je Segment [°C]
 % Kamera-Zuweisung (per Wizard gesetzt, in Datei gespeichert): USB-Port-Pfad
 % je Kamera. Leer = keine Zuweisung -> openDinoLiteCameras nutzt CONFIG-Default.
 camAssign = struct('cam1Port','', 'cam2Port','');
-camAssignFile = fullfile(fileparts(mfilename('fullpath')), 'camAssign.mat');
+if isdeployed
+    % In der kompilierten .exe ist der Skriptordner schreibgeschuetzt/temporaer
+    % -> beschreibbaren, persistenten Pfad im Nutzerprofil verwenden.
+    camAssignDir = fullfile(getenv('APPDATA'), 'bfrAufnahmeApp');
+    if isempty(getenv('APPDATA')), camAssignDir = tempdir; end
+    if ~exist(camAssignDir, 'dir'), try, mkdir(camAssignDir); catch, end, end
+    camAssignFile = fullfile(camAssignDir, 'camAssign.mat');
+else
+    camAssignFile = fullfile(fileparts(mfilename('fullpath')), 'camAssign.mat');
+end
 try
     if isfile(camAssignFile)
         Sca = load(camAssignFile, 'ca');
@@ -435,6 +444,13 @@ txtLog.FontName        = 'Consolas';
 
 updateCamAssignUI();    % Status der gespeicherten Kamera-Zuweisung anzeigen
 logMsg("Bereit. Parameter pruefen und 'Start' druecken.");
+
+% In der kompilierten .exe blockieren, bis das Fenster geschlossen wird —
+% sonst kehrt die Hauptfunktion sofort zurueck und die App beendet sich.
+% In MATLAB (nicht deployed) NICHT blockieren (Kommandozeile bleibt frei).
+if isdeployed
+    uiwait(fig);
+end
 
 %% ================================ Callbacks =====================================
 
@@ -1448,9 +1464,7 @@ function cams = openDinoLiteCameras(dllPath, sides, assignPorts, confirmMsg)
            "Keine gueltige Kameraseite angefordert (erlaubt: LINKS, RECHTS).");
 
     %% 1) DNX64-SDK laden ------------------------------------------------
-    if ~libisloaded('DNX64')
-        loadlibrary(char(dllPath), 'DNX64forMatlab.h', 'alias', 'DNX64');
-    end
+    loadDNX64(dllPath);
 
     %% 2) Portpfade aller angeschlossenen DNX64-Geraete auslesen ---------
     calllib('DNX64','SetVideoDeviceIndex',0); pause(0.1);
@@ -1621,6 +1635,26 @@ function key = extractPortKey(ida)
     if isempty(tok), key = lower(ida); else, key = string(tok{1}); end
 end
 
+function loadDNX64(dllPath)
+% LOADDNX64  Laedt die DNX64-Bibliothek (Alias 'DNX64'), falls noch nicht geladen.
+% In MATLAB ueber den C-Header; in einer kompilierten .exe (isdeployed) ueber
+% die vorab erzeugte Prototyp-Datei DNX64_proto.m + Thunk — denn loadlibrary
+% kann im deployten Modus keinen Header parsen. Siehe buildBfrAufnahmeApp.m.
+    if libisloaded('DNX64'), return; end
+    dll = char(string(dllPath));
+    if isdeployed
+        cand = {fullfile(ctfroot,'DNX64.dll'), which('DNX64.dll'), 'DNX64.dll'};
+        for c = cand
+            if ~isempty(c{1}) && isfile(c{1}), dll = c{1}; break; end
+        end
+    end
+    if isdeployed || exist('DNX64_proto','file') == 2
+        loadlibrary(dll, @DNX64_proto, 'alias', 'DNX64');
+    else
+        loadlibrary(dll, 'DNX64forMatlab.h', 'alias', 'DNX64');
+    end
+end
+
 function [winList, dinoIDs, dinoPorts] = dinoWinvideoMap(dllPath)
 % DINOWINVIDEOMAP  Ermittelt alle winvideo-Kameras und ordnet den Dino-Lites
 % ihren USB-Port-Pfad zu (ueber die DNX64-Reihenfolge).
@@ -1642,9 +1676,7 @@ function [winList, dinoIDs, dinoPorts] = dinoWinvideoMap(dllPath)
     % DNX64-Port-Pfade in DNX64-Index-Reihenfolge
     keys = strings(1, 0);
     try
-        if ~libisloaded('DNX64')
-            loadlibrary(char(string(dllPath)), 'DNX64forMatlab.h', 'alias', 'DNX64');
-        end
+        loadDNX64(dllPath);
         calllib('DNX64','SetVideoDeviceIndex', 0); pause(0.1);
         n = calllib('DNX64','GetVideoDeviceCount');
         keys = strings(1, n);

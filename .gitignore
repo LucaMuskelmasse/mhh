@@ -1,2 +1,7 @@
 # Zur Laufzeit erzeugte, maschinenspezifische Dateien
 camAssign.mat
+
+# Vom Build erzeugte / vendor-spezifische Artefakte
+DNX64_proto.m
+DNX64_thunk_pcwin64.dll
+bfrAufnahmeApp_exe/
