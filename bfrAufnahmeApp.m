@@ -561,7 +561,8 @@ end
         a1 = "";  a2 = "";
         try
             try, imaqreset; pause(0.3); catch, end
-            [winList, dinoIDs, dinoPorts] = dinoWinvideoMap("DNX64.dll");
+            [winList, dinoIDs, dinoPorts, diag] = dinoWinvideoMap("DNX64.dll");
+            for d = 1:numel(diag), logMsg("  [Diagnose] " + diag(d)); end
             if isempty(winList)
                 logMsg("Keine Kameras gefunden — Anschluss/Treiber pruefen.");
             else
@@ -1640,29 +1641,71 @@ function loadDNX64(dllPath)
 % In MATLAB ueber den C-Header; in einer kompilierten .exe (isdeployed) ueber
 % die vorab erzeugte Prototyp-Datei DNX64_proto.m + Thunk — denn loadlibrary
 % kann im deployten Modus keinen Header parsen. Siehe buildBfrAufnahmeApp.m.
+%
+% Wirft bei Misserfolg einen Fehler MIT aussagekraeftiger Meldung (welche
+% Datei fehlte), damit der Aufrufer die Ursache protokollieren kann.
     if libisloaded('DNX64'), return; end
+    useProto = isdeployed || exist('DNX64_proto','file') == 2;
+
+    % --- DNX64.dll lokalisieren -------------------------------------------
     dll = char(string(dllPath));
-    if isdeployed
-        cand = {fullfile(ctfroot,'DNX64.dll'), which('DNX64.dll'), 'DNX64.dll'};
+    if ~isfile(dll)
+        cand = {fullfile(ctfroot,'DNX64.dll'), which('DNX64.dll'), ...
+                fullfile(pwd,'DNX64.dll'), 'DNX64.dll'};
         for c = cand
             if ~isempty(c{1}) && isfile(c{1}), dll = c{1}; break; end
         end
     end
-    if isdeployed || exist('DNX64_proto','file') == 2
-        loadlibrary(dll, @DNX64_proto, 'alias', 'DNX64');
-    else
-        loadlibrary(dll, 'DNX64forMatlab.h', 'alias', 'DNX64');
+    if ~isfile(dll) && ~strcmp(dll,'DNX64.dll')
+        error('DNX64:dllNotFound', 'DNX64.dll nicht gefunden (gesucht: %s).', dll);
     end
+
+    if ~useProto
+        loadlibrary(dll, 'DNX64forMatlab.h', 'alias', 'DNX64');
+        return;
+    end
+
+    % --- Deploy-Modus: Prototyp + Thunk muessen auffindbar sein ------------
+    % loadlibrary loest den Thunk (DNX64_thunk_pcwin64.dll) relativ zum
+    % aktuellen Ordner / Pfad auf. In der .exe liegen Proto + Thunk im
+    % ctfroot. Darum den Proto-Ordner ermitteln, dorthin wechseln (Thunk
+    % wird gefunden) und den Pfad ergaenzen.
+    protoPath = which('DNX64_proto');
+    if isempty(protoPath)
+        cand = {fullfile(ctfroot,'DNX64_proto.m'), fullfile(pwd,'DNX64_proto.m')};
+        for c = cand
+            if isfile(c{1}), protoPath = c{1}; break; end
+        end
+    end
+    if isempty(protoPath) || ~isfile(protoPath)
+        error('DNX64:protoNotFound', ['DNX64_proto.m nicht gefunden ' ...
+              '(weder im Pfad noch in ctfroot=%s). Build wiederholen.'], ctfroot);
+    end
+    protoDir = fileparts(protoPath);
+    thunk    = fullfile(protoDir, 'DNX64_thunk_pcwin64.dll');
+    if ~isfile(thunk)
+        error('DNX64:thunkNotFound', ['Thunk DNX64_thunk_pcwin64.dll fehlt ' ...
+              'neben dem Prototyp (%s). Build wiederholen.'], protoDir);
+    end
+
+    oldDir = pwd;
+    cu = onCleanup(@() cd(oldDir));
+    cd(protoDir);                          % Thunk wird relativ hier gefunden
+    try, addpath(protoDir); catch, end     % Proto als Funktion auffindbar
+    loadlibrary(dll, @DNX64_proto, 'alias', 'DNX64');
 end
 
-function [winList, dinoIDs, dinoPorts] = dinoWinvideoMap(dllPath)
+function [winList, dinoIDs, dinoPorts, diag] = dinoWinvideoMap(dllPath)
 % DINOWINVIDEOMAP  Ermittelt alle winvideo-Kameras und ordnet den Dino-Lites
 % ihren USB-Port-Pfad zu (ueber die DNX64-Reihenfolge).
 %   winList   - struct-Array .id (winvideo-ID) .name (Geraetename), ALLE Kameras
 %   dinoIDs   - sortierte winvideo-IDs der Dino-Lites
 %   dinoPorts - zugehoerige USB-Port-Pfade (gleiche Reihenfolge wie dinoIDs);
 %               leer/"" wenn die Zuordnung nicht moeglich war (Anzahl passt nicht)
+%   diag      - string-Array mit Diagnosezeilen (warum die Zuordnung ggf.
+%               scheitert) — wichtig in der .exe, wo DNX64 evtl. nicht laedt.
     if nargin < 1 || strlength(string(dllPath)) == 0, dllPath = "DNX64.dll"; end
+    diag = strings(1,0);
     winList = struct('id', {}, 'name', {});
     try
         info = imaqhwinfo('winvideo');
@@ -1670,21 +1713,30 @@ function [winList, dinoIDs, dinoPorts] = dinoWinvideoMap(dllPath)
             winList(k).id   = info.DeviceInfo(k).DeviceID;        %#ok<AGROW>
             winList(k).name = string(info.DeviceInfo(k).DeviceName);
         end
-    catch
+    catch ME
+        diag(end+1) = "imaqhwinfo('winvideo') fehlgeschlagen: " + string(ME.message);
     end
+    nm = strings(1, numel(winList));
+    for k = 1:numel(winList), nm(k) = winList(k).name; end
+    diag(end+1) = sprintf("winvideo-Geraete (%d): %s", numel(winList), ...
+                          char(strjoin(nm, " | ")));
 
     % DNX64-Port-Pfade in DNX64-Index-Reihenfolge
     keys = strings(1, 0);
     try
         loadDNX64(dllPath);
+        diag(end+1) = "DNX64 geladen.";
         calllib('DNX64','SetVideoDeviceIndex', 0); pause(0.1);
         n = calllib('DNX64','GetVideoDeviceCount');
+        diag(end+1) = sprintf("DNX64 GetVideoDeviceCount = %d", n);
         keys = strings(1, n);
         for idx = 0:n-1
             calllib('DNX64','SetVideoDeviceIndex', idx); pause(0.1);
             keys(idx+1) = extractPortKey(string(calllib('DNX64','GetDeviceIDA', idx)));
         end
-    catch
+        diag(end+1) = "DNX64 Port-Kennungen: " + char(strjoin(keys, ", "));
+    catch ME
+        diag(end+1) = "DNX64 NICHT verfuegbar: " + string(ME.message);
     end
 
     % Dino-Lite-winvideo-IDs (Webcam per Name herausfiltern), sortiert
@@ -1695,12 +1747,16 @@ function [winList, dinoIDs, dinoPorts] = dinoWinvideoMap(dllPath)
         end
     end
     dinoIDs = sort(dinoIDs);
+    diag(end+1) = sprintf("Per Name als Dino-Lite erkannt: %d (winvideo-IDs %s)", ...
+                          numel(dinoIDs), mat2str(dinoIDs));
 
     % Zuordnung sortierte Dino-winvideo-Reihenfolge <-> DNX64-Reihenfolge
     if numel(dinoIDs) == numel(keys) && ~isempty(dinoIDs)
         dinoPorts = keys;
     else
         dinoPorts = strings(1, numel(dinoIDs));   % keine Zuordnung moeglich
+        diag(end+1) = sprintf(['Zuordnung NICHT moeglich: Dino-Anzahl (%d) ' ...
+            '!= DNX64-Anzahl (%d) -> keine USB-Ports.'], numel(dinoIDs), numel(keys));
     end
 end
 

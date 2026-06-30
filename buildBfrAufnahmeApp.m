@@ -85,7 +85,7 @@ function buildBfrAufnahmeApp(iconFile)
     end
 
     %% 3) Bauen ---------------------------------------------------------------
-    fprintf('2) Starte Build — das dauert einige Minuten ...\n');
+    fprintf('2) Starte Build - das dauert einige Minuten ...\n');
     results = compiler.build.standaloneApplication(args{:});
 
     fprintf('\n==================================================\n');
