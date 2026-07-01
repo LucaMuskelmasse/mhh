@@ -34,6 +34,12 @@
 %      dieses bearbeiten.
 %    - Alle Videos: wie bisher werden alle *_Camera1.mp4 im Ordner nacheinander
 %      bearbeitet.
+% 7. GANZ ZU BEGINN (vor allen anderen Fenstern) ein Fenster mit 2 Buttons
+%    (RGB Image / BW Maske) zum Testen der Background-Subtraction-Parameter:
+%    legt fest, ob die Live-Vorschau (Abschnitt 5) das RGB-Bild oder die
+%    binäre Vordergrundmaske zeigt. Ordner 2 verwendet dabei eigene
+%    Background-Subtraction-Parameter (numBgFrames2/fgThreshold2/minBlobSize2),
+%    Ordner 1 und 3 die ursprünglichen (numBgFrames/fgThreshold/minBlobSize).
 %
 % Es gibt KEINE Tip-Zuweisung per Suchradius und KEINE manuelle Korrektur mehr
 % (gegenüber cochlea_model_tracking.m bewusst entfernt). Background Subtraction
@@ -53,9 +59,15 @@ widthSlope  = 0.05;  % Breitenzuwachs je px Abstand zum Mittelpunkt [px/px]
 heightSlope = 0.4;   % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
 
 % --- Background-Subtraction-Parameter (wie in cochlea_model_tracking.m) ---
+% Gelten für Ordner 1 und Ordner 3 unverändert.
 numBgFrames = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hintergrund
 fgThreshold = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
 minBlobSize = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
+
+% --- Background-Subtraction-Parameter NUR für Ordner 2 (gesondert einstellbar) ---
+numBgFrames2 = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hintergrund
+fgThreshold2 = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
+minBlobSize2 = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
 
 % --- Live-Vorschau während des Durchlaufs ---
 showPreview = true;  % true = aktuellen Frame + Tip beim Durchlauf anzeigen
@@ -85,6 +97,13 @@ simRotationDeg = 0;             % Rotation um M [°], gegen den Uhrzeigersinn po
 simScale       = 2;             % Skalierungsfaktor (um M)
 simTranslation = [230, 200];    % [tx, ty] zusätzliche Verschiebung [px]
 
+%% -1. Vorschau-Anzeige auswählen (RGB Image / BW Maske) - zum Testen der
+%      Background-Subtraction-Parameter (v.a. für Ordner 2)
+previewMode = selectPreviewMode();
+if isempty(previewMode)
+    error('Kein Vorschau-Modus ausgewählt');
+end
+
 %% 0. Ordner-Szenario auswählen (Ordner 1 / 2 / 3)
 folderChoice = selectFolderScenario();
 if isempty(folderChoice)
@@ -95,6 +114,10 @@ switch folderChoice
         defaultPath = defaultPath1;
     case 2
         defaultPath = defaultPath2;
+        % Ordner 2: eigene Background-Subtraction-Parameter verwenden
+        numBgFrames = numBgFrames2;
+        fgThreshold = fgThreshold2;
+        minBlobSize = minBlobSize2;
     case 3
         defaultPath = defaultPath3;
 end
@@ -305,7 +328,11 @@ for vi = 1:numVideos
     if showPreview
         hFig = figure('Name', ['Tip-Tracking ' vLabel], 'NumberTitle', 'off');
         hAx  = axes('Parent', hFig);
-        hImg = imshow(zeros(H, W, 3, 'uint8'), 'Parent', hAx);
+        if previewMode == 1
+            hImg = imshow(zeros(H, W, 3, 'uint8'), 'Parent', hAx);   % RGB Image
+        else
+            hImg = imshow(false(H, W), 'Parent', hAx);               % BW Maske
+        end
         hold(hAx, 'on');
         plot(hAx, M(1), M(2), 'cx', 'MarkerSize', 16, 'LineWidth', 2);  % Mittelpunkt
         plot(hAx, xs, ys, 'r+', 'MarkerSize', 8, 'LineWidth', 1.2);     % Trajektorie
@@ -362,7 +389,11 @@ for vi = 1:numVideos
 
         % --- Live-Vorschau aktualisieren ---
         if showPreview && isvalid(hFig)
-            set(hImg, 'CData', rgbFiltered);
+            if previewMode == 1
+                set(hImg, 'CData', rgbFiltered);   % RGB Image
+            else
+                set(hImg, 'CData', fg);            % BW Maske (Vordergrund)
+            end
             bc = allCorners{foundIdx};
             set(hBox, 'XData', bc(:,1), 'YData', bc(:,2));
             set(hTip, 'XData', tipXY(1), 'YData', tipXY(2));
@@ -630,6 +661,49 @@ function choice = selectVideoMode()
         'Units', 'normalized', 'Position', [0.07 0.15 0.4 0.4], ...
         'FontWeight', 'bold', 'Callback', @(s,e) setChoice(1));
     uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Alle Videos', ...
+        'Units', 'normalized', 'Position', [0.53 0.15 0.4 0.4], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(2));
+
+    set(hFig, 'CloseRequestFcn', @(s,e) closeFig());
+
+    uiwait(hFig);   % blockiert, bis ein Button gedrückt / Fenster geschlossen wird
+
+    % ---------- verschachtelte Funktionen ----------
+    function setChoice(c)
+        choice = c;
+        closeFig();
+    end
+
+    function closeFig()
+        if isvalid(hFig)
+            uiresume(hFig);
+            delete(hFig);
+        end
+    end
+end
+
+
+%% Lokale Funktion: Vorschau-Anzeige auswählen (RGB Image / BW Maske)
+function choice = selectPreviewMode()
+%SELECTPREVIEWMODE  Modales Fenster mit 2 Buttons (RGB Image / BW Maske).
+%   Legt fest, was die Live-Vorschau während des Trackings zeigt - dient zum
+%   Testen/Einstellen der Background-Subtraction-Parameter (v.a. Ordner 2).
+%   Rückgabe: 1 = RGB Image, 2 = BW Maske; [] falls ohne Auswahl geschlossen.
+
+    choice = [];
+
+    hFig = figure('Name', 'Vorschau-Anzeige auswählen', 'NumberTitle', 'off', ...
+        'MenuBar', 'none', 'ToolBar', 'none', 'Resize', 'off', ...
+        'Position', [500 500 300 140]);
+
+    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Live-Vorschau: RGB oder BW?', ...
+        'Units', 'normalized', 'Position', [0.05 0.65 0.9 0.25], ...
+        'FontSize', 11, 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
+
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'RGB Image', ...
+        'Units', 'normalized', 'Position', [0.07 0.15 0.4 0.4], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(1));
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'BW Maske', ...
         'Units', 'normalized', 'Position', [0.53 0.15 0.4 0.4], ...
         'FontWeight', 'bold', 'Callback', @(s,e) setChoice(2));
 
