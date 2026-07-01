@@ -24,11 +24,12 @@
 % 4. In jedem Figure-Titel steht zusätzlich, welches V0x bearbeitet wird. Die
 %    Plots bleiben offen; die Videos laufen automatisch nacheinander durch.
 % 5. Vor der Ordnerauswahl öffnet sich ein Fenster mit 3 Buttons (Ordner 1/2/3):
-%    - Ordner 1 und Ordner 2: Verarbeitung wie oben beschrieben, unverändert.
-%    - Ordner 3: zusätzlich wird eine Ähnlichkeitstransformation (Rotation,
-%      Skalierung, Translation; Parameter oben einstellbar) auf die geladene
-%      Trajektorie und den Mittelpunkt angewendet, bevor die Trapeze berechnet
-%      werden - die Trapeze sind dadurch automatisch mit transformiert.
+%    - Ordner 1: Verarbeitung wie oben beschrieben, unverändert.
+%    - Ordner 2 und Ordner 3: zusätzlich wird eine Ähnlichkeitstransformation
+%      (Rotation, Skalierung, Translation; Parameter oben einstellbar, JEWEILS
+%      EIGENE für Ordner 2 und Ordner 3) auf die geladene Trajektorie und den
+%      Mittelpunkt angewendet, bevor die Trapeze berechnet werden - die
+%      Trapeze sind dadurch automatisch mit transformiert.
 % 6. Danach ein weiteres Fenster mit 2 Buttons (Ein Video / Alle Videos):
 %    - Ein Video: EIN bestimmtes Video aus dem Ordner auswählen und nur
 %      dieses bearbeiten.
@@ -87,15 +88,20 @@ defaultPath1 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
 defaultPath2 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\SlimStraigth_EA';
 defaultPath3 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\vers_Lichter';
 
-% --- Ähnlichkeitstransformation der Trajektorie (nur bei Ordner 3) ---
+% --- Ähnlichkeitstransformation der Trajektorie (bei Ordner 2 bzw. Ordner 3) ---
 % Bildet Trajektorie + Mittelpunkt vom Koordinatensystem, in dem sie erstellt
-% wurden, in das Koordinatensystem der Ordner-3-Videos ab. Rotation und
-% Skalierung erfolgen um den Mittelpunkt M (relativ zu M); anschließend wird
-% zusätzlich um simTranslation verschoben:
+% wurden, in das Koordinatensystem der Ordner-2- bzw. Ordner-3-Videos ab.
+% Rotation und Skalierung erfolgen um den Mittelpunkt M (relativ zu M);
+% anschließend wird zusätzlich um simTranslation verschoben:
 %   [x'; y'] = simScale * R(simRotationDeg) * ([x;y] - M) + M + simTranslation'
-simRotationDeg = 0;             % Rotation um M [°], gegen den Uhrzeigersinn positiv
-simScale       = 2;             % Skalierungsfaktor (um M)
-simTranslation = [230, 200];    % [tx, ty] zusätzliche Verschiebung [px]
+% Ordner 2 und Ordner 3 haben JEWEILS EIGENE, unabhängige Parameter.
+simRotationDeg2 = 0;             % Rotation um M [°] für Ordner 2, gegen den Uhrzeigersinn positiv
+simScale2       = 1;             % Skalierungsfaktor (um M) für Ordner 2
+simTranslation2 = [0, 0];        % [tx, ty] zusätzliche Verschiebung [px] für Ordner 2
+
+simRotationDeg3 = 0;             % Rotation um M [°] für Ordner 3, gegen den Uhrzeigersinn positiv
+simScale3       = 2;             % Skalierungsfaktor (um M) für Ordner 3
+simTranslation3 = [230, 200];    % [tx, ty] zusätzliche Verschiebung [px] für Ordner 3
 
 %% -1. Vorschau-Anzeige auswählen (RGB Image / BW Maske) - zum Testen der
 %      Background-Subtraction-Parameter (v.a. für Ordner 2)
@@ -114,12 +120,20 @@ switch folderChoice
         defaultPath = defaultPath1;
     case 2
         defaultPath = defaultPath2;
-        % Ordner 2: eigene Background-Subtraction-Parameter verwenden
+        % Ordner 2: eigene Background-Subtraction-Parameter + eigene
+        % Ähnlichkeitstransformation verwenden
         numBgFrames = numBgFrames2;
         fgThreshold = fgThreshold2;
         minBlobSize = minBlobSize2;
+        simRotationDegActive = simRotationDeg2;
+        simScaleActive       = simScale2;
+        simTranslationActive = simTranslation2;
     case 3
         defaultPath = defaultPath3;
+        % Ordner 3: eigene Ähnlichkeitstransformation verwenden
+        simRotationDegActive = simRotationDeg3;
+        simScaleActive       = simScale3;
+        simTranslationActive = simTranslation3;
 end
 
 %% 1. ORDNER mit MP4-Videos auswählen
@@ -174,30 +188,30 @@ end
 TipCoordinates = S.TipCoordinates;   % [row, col] = [y, x]  (für alle Videos)
 M = S.cochleaCenter;                 % [x, y] = [col, row]   (für alle Videos)
 
-%% 2c. Bei Ordner 3: Ähnlichkeitstransformation auf Trajektorie + Mittelpunkt
+%% 2c. Bei Ordner 2 oder Ordner 3: Ähnlichkeitstransformation auf Trajektorie + Mittelpunkt
 % Rotation und Skalierung erfolgen um den Mittelpunkt M (relativ zu M) ->
 % M selbst bewegt sich dabei nicht, wird aber anschließend wie die Trajektorie
-% um simTranslation verschoben. Die Trapeze werden weiter unten aus dieser
-% (dann bereits transformierten) Trajektorie berechnet und sind dadurch
-% automatisch mit transformiert. Die Trapez-Grundmaße (rectWidth/rectHeight)
-% werden mit simScale skaliert, damit sie im neuen Maßstab weiterhin der
-% tatsächlichen Elektrodengröße entsprechen.
-if folderChoice == 3
-    theta = deg2rad(simRotationDeg);
+% um simTranslationActive verschoben. Die Trapeze werden weiter unten aus
+% dieser (dann bereits transformierten) Trajektorie berechnet und sind
+% dadurch automatisch mit transformiert. Die Trapez-Grundmaße
+% (rectWidth/rectHeight) werden mit simScaleActive skaliert, damit sie im
+% neuen Maßstab weiterhin der tatsächlichen Elektrodengröße entsprechen.
+if folderChoice == 2 || folderChoice == 3
+    theta = deg2rad(simRotationDegActive);
     Rmat  = [cos(theta) -sin(theta); sin(theta) cos(theta)];
 
     xyTraj = [TipCoordinates(:,2), TipCoordinates(:,1)];        % [x, y]
-    xyTraj = (simScale * Rmat * (xyTraj - M).').' + M + simTranslation;
+    xyTraj = (simScaleActive * Rmat * (xyTraj - M).').' + M + simTranslationActive;
     TipCoordinates = [xyTraj(:,2), xyTraj(:,1)];                % zurück zu [row, col]
 
-    M = M + simTranslation;   % M ist Rotations-/Skalierungszentrum -> nur Verschiebung
+    M = M + simTranslationActive;   % M ist Rotations-/Skalierungszentrum -> nur Verschiebung
 
-    rectWidth  = rectWidth  * simScale;
-    rectHeight = rectHeight * simScale;
+    rectWidth  = rectWidth  * simScaleActive;
+    rectHeight = rectHeight * simScaleActive;
 
-    fprintf(['Ähnlichkeitstransformation angewendet (Ordner 3): Rotation=%.2f°, ', ...
-        'Skalierung=%.3f, Translation=[%.1f, %.1f]\n'], ...
-        simRotationDeg, simScale, simTranslation(1), simTranslation(2));
+    fprintf(['Ähnlichkeitstransformation angewendet (Ordner %d): Rotation=%.2f°, ', ...
+        'Skalierung=%.3f, Translation=[%.1f, %.1f]\n'], folderChoice, ...
+        simRotationDegActive, simScaleActive, simTranslationActive(1), simTranslationActive(2));
 end
 
 %% Schleife über alle Videos im Ordner
