@@ -37,9 +37,9 @@ clear; clc; close all;
 % Breite und Höhe linear (Steigung). Da jede Ecke EINZELN nach ihrem Abstand
 % zum Mittelpunkt skaliert wird, werden die Boxen zu Trapezen / echten Vierecken.
 rectWidth   = 4;     % Grundbreite (tangential) bei Abstand 0 [px]
-rectHeight  = 12;    % Grundhöhe   (normal)     bei Abstand 0 [px]
+rectHeight  = 10;    % Grundhöhe   (normal)     bei Abstand 0 [px]
 widthSlope  = 0.05;  % Breitenzuwachs je px Abstand zum Mittelpunkt [px/px]
-heightSlope = 0.5;   % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
+heightSlope = 0.4;   % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
 
 % --- Background-Subtraction-Parameter (wie in cochlea_model_tracking.m) ---
 numBgFrames = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hintergrund
@@ -378,7 +378,7 @@ for vi = 1:numVideos
             end
         end
 
-        % --- Winkel über TimeStamp (Spalte U) ---
+        % --- Zeitachse (TimeStamp, sonst Frame-Nummer als Fallback) ---
         if haveCSV
             vT = valid & ~isnan(tsFrame);
             xT = tsFrame(vT);     xlabT = 'TimeStamp (Spalte U)';
@@ -386,71 +386,74 @@ for vi = 1:numVideos
             vT = valid;
             xT = find(vT);        xlabT = 'Frame (keine CSV)';
         end
-        figure('Name', ['Winkel über TimeStamp ' vLabel], 'NumberTitle', 'off');
-        plot(xT, angleUnwrapped(vT), 'b.-', 'LineWidth', 1.5, 'MarkerSize', 12);
-        grid on;
-        xlabel(xlabT);
-        ylabel('Winkel [°]');
-        title(sprintf('Winkel über TimeStamp (gegen Uhrzeigersinn positiv) (%s)', vLabel));
 
-        % --- Insertionstiefe über TimeStamp ---
-        figure('Name', ['Insertionstiefe über TimeStamp ' vLabel], 'NumberTitle', 'off');
-        plot(xT, insertionDepth(vT), 'b.-', 'LineWidth', 1.5, 'MarkerSize', 12);
-        grid on;
-        xlabel(xlabT);
-        ylabel('Insertionstiefe [mm]');
-        title(sprintf('Insertionstiefe über TimeStamp (%s)', vLabel));
+        % --- Insertionstiefe glätten ---
+        insertionDepthSmooth = nan(nImg, 1);
+        insertionDepthSmooth(vT) = smooth(insertionDepth(vT), smoothSpan);
 
-        % --- Geglätteter Winkel über TimeStamp ---
-        if haveCSV
-            vT = valid & ~isnan(tsFrame);
-            figure('Name', ['Winkel (geglättet) über TimeStamp ' vLabel], 'NumberTitle', 'off');
-            hold on;
-            plot(tsFrame(vT), angleUnwrapped(vT), 'Color', [0.7 0.7 0.7], ...
-                'LineStyle', '-', 'Marker', '.', 'MarkerSize', 8, 'LineWidth', 0.8, ...
-                'DisplayName', 'Roh');
-            plot(tsFrame(vT), angleSmooth(vT), 'b-', 'LineWidth', 2.0, ...
-                'DisplayName', sprintf('Geglättet (span=%d)', smoothSpan));
-            hold off;
-            grid on;
-            xlabel(xlabT);
-            ylabel('Winkel [°]');
-            title(sprintf('Winkel (geglättet) über TimeStamp (%s)', vLabel));
-            legend('Location', 'best');
-        end
-
-        % --- Kraft z abhängig vom Winkel (Spalte C) ---
-        if haveCSV
-            vF = valid & ~isnan(fzFrame);
-            figure('Name', ['Kraft z über Winkel ' vLabel], 'NumberTitle', 'off');
-            plot(angleUnwrapped(vF), fzFrame(vF), 'b.-', 'LineWidth', 1.0, 'MarkerSize', 12);
-            grid on;
-            xlabel('Winkel [°]');
-            ylabel('Kraft z-Richtung (Spalte C)');
-            title(sprintf('Kraft z über Winkel (%s)', vLabel));
-        end
-
-        % --- Geglättete Kraft z abhängig vom Winkel ---
+        % --- Kraft z je Frame (roh + geglättet) ---
         if haveCSV
             vF = valid & ~isnan(fzFrame);
             forceSmooth = nan(nImg, 1);
             forceSmooth(vF) = smooth(fzFrame(vF), smoothSpan);
-            figure('Name', ['Kraft z (geglättet) über Winkel ' vLabel], 'NumberTitle', 'off');
-            hold on;
-            plot(angleUnwrapped(vF), fzFrame(vF), 'Color', [0.7 0.7 0.7], ...
-                'LineStyle', '-', 'Marker', '.', 'MarkerSize', 8, 'LineWidth', 0.8, ...
-                'DisplayName', 'Roh');
-            plot(angleUnwrapped(vF), forceSmooth(vF), 'r-', 'LineWidth', 2.0, ...
-                'DisplayName', sprintf('Geglättet (span=%d)', smoothSpan));
-            hold off;
-            grid on;
-            xlabel('Winkel [°]');
-            ylabel('Kraft z-Richtung (Spalte C)');
-            title(sprintf('Kraft z (geglättet) über Winkel (%s)', vLabel));
-            legend('Location', 'best');
         else
+            vF = false(nImg, 1);
             forceSmooth = nan(nImg, 1);
         end
+
+        % --- Übersicht: 3 Zeilen (Winkel/Zeit, Insertionstiefe/Zeit, Kraft/Winkel) ---
+        %     x 2 Spalten (roh | geglättet)
+        figure('Name', ['Übersicht ' vLabel], 'NumberTitle', 'off');
+
+        subplot(3,2,1);
+        plot(xT, angleUnwrapped(vT), 'b.-', 'LineWidth', 1.2, 'MarkerSize', 8);
+        grid on; xlabel(xlabT); ylabel('Winkel [°]');
+        title('Winkel über TimeStamp (roh)');
+
+        subplot(3,2,2);
+        hold on;
+        plot(xT, angleUnwrapped(vT), 'Color', [0.7 0.7 0.7], 'LineStyle', '-', ...
+            'Marker', '.', 'MarkerSize', 6, 'LineWidth', 0.6, 'DisplayName', 'Roh');
+        plot(xT, angleSmooth(vT), 'b-', 'LineWidth', 1.8, ...
+            'DisplayName', sprintf('Geglättet (span=%d)', smoothSpan));
+        hold off;
+        grid on; xlabel(xlabT); ylabel('Winkel [°]');
+        title('Winkel über TimeStamp (geglättet)');
+        legend('Location', 'best');
+
+        subplot(3,2,3);
+        plot(xT, insertionDepth(vT), 'b.-', 'LineWidth', 1.2, 'MarkerSize', 8);
+        grid on; xlabel(xlabT); ylabel('Insertionstiefe [mm]');
+        title('Insertionstiefe über TimeStamp (roh)');
+
+        subplot(3,2,4);
+        hold on;
+        plot(xT, insertionDepth(vT), 'Color', [0.7 0.7 0.7], 'LineStyle', '-', ...
+            'Marker', '.', 'MarkerSize', 6, 'LineWidth', 0.6, 'DisplayName', 'Roh');
+        plot(xT, insertionDepthSmooth(vT), 'b-', 'LineWidth', 1.8, ...
+            'DisplayName', sprintf('Geglättet (span=%d)', smoothSpan));
+        hold off;
+        grid on; xlabel(xlabT); ylabel('Insertionstiefe [mm]');
+        title('Insertionstiefe über TimeStamp (geglättet)');
+        legend('Location', 'best');
+
+        subplot(3,2,5);
+        plot(angleUnwrapped(vF), fzFrame(vF), 'b.-', 'LineWidth', 1.0, 'MarkerSize', 8);
+        grid on; xlabel('Winkel [°]'); ylabel('Kraft z-Richtung (Spalte C)');
+        title('Kraft z über Winkel (roh)');
+
+        subplot(3,2,6);
+        hold on;
+        plot(angleUnwrapped(vF), fzFrame(vF), 'Color', [0.7 0.7 0.7], 'LineStyle', '-', ...
+            'Marker', '.', 'MarkerSize', 6, 'LineWidth', 0.6, 'DisplayName', 'Roh');
+        plot(angleUnwrapped(vF), forceSmooth(vF), 'r-', 'LineWidth', 1.8, ...
+            'DisplayName', sprintf('Geglättet (span=%d)', smoothSpan));
+        hold off;
+        grid on; xlabel('Winkel [°]'); ylabel('Kraft z-Richtung (Spalte C)');
+        title('Kraft z über Winkel (geglättet)');
+        legend('Location', 'best');
+
+        sgtitle(sprintf('Übersicht (%s)', vLabel));
 
         % --- Alle Ergebnisse in einem Struct sammeln ---
         results = struct( ...
@@ -462,7 +465,8 @@ for vi = 1:numVideos
             'forceSmoothed', forceSmooth, ...
             'angle',         angleUnwrapped, ...
             'angleSmoothed', angleSmooth, ...
-            'insertionDepth', insertionDepth);
+            'insertionDepth', insertionDepth, ...
+            'insertionDepthSmoothed', insertionDepthSmooth);
 
         % Neben dem Video als <videoname>_results.mat speichern
         resFile = fullfile(vidDir, [vidName '_results.mat']);
