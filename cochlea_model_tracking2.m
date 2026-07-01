@@ -72,12 +72,13 @@ defaultPath3 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';   % bi
 
 % --- Ähnlichkeitstransformation der Trajektorie (nur bei Ordner 3) ---
 % Bildet Trajektorie + Mittelpunkt vom Koordinatensystem, in dem sie erstellt
-% wurden, in das Koordinatensystem der Ordner-3-Videos ab:
-%   [x'; y'] = simScale * R(simRotationDeg) * [x; y] + simTranslation'
-% Rotation erfolgt um den Ursprung (0,0) des Bildkoordinatensystems.
-simRotationDeg = 0;         % Rotation [°], gegen den Uhrzeigersinn positiv
-simScale       = 1;         % Skalierungsfaktor
-simTranslation = [0, 0];    % [tx, ty] Verschiebung [px]
+% wurden, in das Koordinatensystem der Ordner-3-Videos ab. Rotation und
+% Skalierung erfolgen um den Mittelpunkt M (relativ zu M); anschließend wird
+% zusätzlich um simTranslation verschoben:
+%   [x'; y'] = simScale * R(simRotationDeg) * ([x;y] - M) + M + simTranslation'
+simRotationDeg = 0;         % Rotation um M [°], gegen den Uhrzeigersinn positiv
+simScale       = 1;         % Skalierungsfaktor (um M)
+simTranslation = [0, 0];    % [tx, ty] zusätzliche Verschiebung [px]
 
 %% 0. Ordner-Szenario auswählen (Ordner 1 / 2 / 3)
 folderChoice = selectFolderScenario();
@@ -110,8 +111,10 @@ listing = listing(ord);
 numVideos = numel(listing);
 
 %% 2. EINE Trajektorie (.mat) auswählen - gilt für alle Videos
+% Die Trajektorie liegt für alle Videos (Ordner 1/2/3) in Ordner 1 -> als
+% Startverzeichnis für den Dialog wird daher immer defaultPath1 verwendet.
 [matFile, matDir] = uigetfile({'*.mat','MAT-Datei mit Trajektorie (*.mat)'; '*.*','Alle Dateien (*.*)'}, ...
-    'Trajektorie (.mat) auswählen (gilt für alle Videos)', vidDir);
+    'Trajektorie (.mat) auswählen (gilt für alle Videos, liegt in Ordner 1)', defaultPath1);
 if isequal(matFile, 0)
     error('Keine Trajektorie ausgewählt');
 end
@@ -126,19 +129,22 @@ TipCoordinates = S.TipCoordinates;   % [row, col] = [y, x]  (für alle Videos)
 M = S.cochleaCenter;                 % [x, y] = [col, row]   (für alle Videos)
 
 %% 2c. Bei Ordner 3: Ähnlichkeitstransformation auf Trajektorie + Mittelpunkt
-% Die Trapeze werden weiter unten aus dieser (dann bereits transformierten)
-% Trajektorie berechnet und sind dadurch automatisch mit transformiert. Die
-% Trapez-Grundmaße (rectWidth/rectHeight) werden mit simScale skaliert, damit
-% sie im neuen Maßstab weiterhin der tatsächlichen Elektrodengröße entsprechen.
+% Rotation und Skalierung erfolgen um den Mittelpunkt M (relativ zu M) ->
+% M selbst bewegt sich dabei nicht, wird aber anschließend wie die Trajektorie
+% um simTranslation verschoben. Die Trapeze werden weiter unten aus dieser
+% (dann bereits transformierten) Trajektorie berechnet und sind dadurch
+% automatisch mit transformiert. Die Trapez-Grundmaße (rectWidth/rectHeight)
+% werden mit simScale skaliert, damit sie im neuen Maßstab weiterhin der
+% tatsächlichen Elektrodengröße entsprechen.
 if folderChoice == 3
     theta = deg2rad(simRotationDeg);
     Rmat  = [cos(theta) -sin(theta); sin(theta) cos(theta)];
 
     xyTraj = [TipCoordinates(:,2), TipCoordinates(:,1)];        % [x, y]
-    xyTraj = (simScale * Rmat * xyTraj.').' + simTranslation;   % transformieren
+    xyTraj = (simScale * Rmat * (xyTraj - M).').' + M + simTranslation;
     TipCoordinates = [xyTraj(:,2), xyTraj(:,1)];                % zurück zu [row, col]
 
-    M = (simScale * Rmat * M(:)).' + simTranslation;            % [x, y]
+    M = M + simTranslation;   % M ist Rotations-/Skalierungszentrum -> nur Verschiebung
 
     rectWidth  = rectWidth  * simScale;
     rectHeight = rectHeight * simScale;
