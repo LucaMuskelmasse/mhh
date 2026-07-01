@@ -23,6 +23,12 @@
 %      Kraft z anzeigen.
 % 4. In jedem Figure-Titel steht zusätzlich, welches V0x bearbeitet wird. Die
 %    Plots bleiben offen; die Videos laufen automatisch nacheinander durch.
+% 5. Vor der Ordnerauswahl öffnet sich ein Fenster mit 3 Buttons (Ordner 1/2/3):
+%    - Ordner 1 und Ordner 2: Verarbeitung wie oben beschrieben, unverändert.
+%    - Ordner 3: zusätzlich wird eine Ähnlichkeitstransformation (Rotation,
+%      Skalierung, Translation; Parameter oben einstellbar) auf die geladene
+%      Trajektorie und den Mittelpunkt angewendet, bevor die Trapeze berechnet
+%      werden - die Trapeze sind dadurch automatisch mit transformiert.
 %
 % Es gibt KEINE Tip-Zuweisung per Suchradius und KEINE manuelle Korrektur mehr
 % (gegenüber cochlea_model_tracking.m bewusst entfernt). Background Subtraction
@@ -59,10 +65,36 @@ smoothSpan = 15;     % Breite des gleitenden Mittelwerts (Frames); ungerade empf
 % am Trajektorienende ergibt sich die Insertionstiefe in mm.
 insertionDepthMax = 28;   % tatsächliche Tiefe am Trajektorienende [mm]
 
-defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
+% --- Standard-Startpfade für die 3 Ordner-Buttons (unten anpassen) ---
+defaultPath1 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
+defaultPath2 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
+defaultPath3 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';   % bitte anpassen
+
+% --- Ähnlichkeitstransformation der Trajektorie (nur bei Ordner 3) ---
+% Bildet Trajektorie + Mittelpunkt vom Koordinatensystem, in dem sie erstellt
+% wurden, in das Koordinatensystem der Ordner-3-Videos ab:
+%   [x'; y'] = simScale * R(simRotationDeg) * [x; y] + simTranslation'
+% Rotation erfolgt um den Ursprung (0,0) des Bildkoordinatensystems.
+simRotationDeg = 0;         % Rotation [°], gegen den Uhrzeigersinn positiv
+simScale       = 1;         % Skalierungsfaktor
+simTranslation = [0, 0];    % [tx, ty] Verschiebung [px]
+
+%% 0. Ordner-Szenario auswählen (Ordner 1 / 2 / 3)
+folderChoice = selectFolderScenario();
+if isempty(folderChoice)
+    error('Kein Ordner-Szenario ausgewählt');
+end
+switch folderChoice
+    case 1
+        defaultPath = defaultPath1;
+    case 2
+        defaultPath = defaultPath2;
+    case 3
+        defaultPath = defaultPath3;
+end
 
 %% 1. ORDNER mit MP4-Videos auswählen
-vidDir = uigetdir(defaultPath, 'Ordner mit MP4-Videos auswählen');
+vidDir = uigetdir(defaultPath, sprintf('Ordner mit MP4-Videos auswählen (Ordner %d)', folderChoice));
 if isequal(vidDir, 0)
     error('Kein Ordner ausgewählt');
 end
@@ -92,6 +124,29 @@ if ~isfield(S, 'cochleaCenter')
 end
 TipCoordinates = S.TipCoordinates;   % [row, col] = [y, x]  (für alle Videos)
 M = S.cochleaCenter;                 % [x, y] = [col, row]   (für alle Videos)
+
+%% 2c. Bei Ordner 3: Ähnlichkeitstransformation auf Trajektorie + Mittelpunkt
+% Die Trapeze werden weiter unten aus dieser (dann bereits transformierten)
+% Trajektorie berechnet und sind dadurch automatisch mit transformiert. Die
+% Trapez-Grundmaße (rectWidth/rectHeight) werden mit simScale skaliert, damit
+% sie im neuen Maßstab weiterhin der tatsächlichen Elektrodengröße entsprechen.
+if folderChoice == 3
+    theta = deg2rad(simRotationDeg);
+    Rmat  = [cos(theta) -sin(theta); sin(theta) cos(theta)];
+
+    xyTraj = [TipCoordinates(:,2), TipCoordinates(:,1)];        % [x, y]
+    xyTraj = (simScale * Rmat * xyTraj.').' + simTranslation;   % transformieren
+    TipCoordinates = [xyTraj(:,2), xyTraj(:,1)];                % zurück zu [row, col]
+
+    M = (simScale * Rmat * M(:)).' + simTranslation;            % [x, y]
+
+    rectWidth  = rectWidth  * simScale;
+    rectHeight = rectHeight * simScale;
+
+    fprintf(['Ähnlichkeitstransformation angewendet (Ordner 3): Rotation=%.2f°, ', ...
+        'Skalierung=%.3f, Translation=[%.1f, %.1f]\n'], ...
+        simRotationDeg, simScale, simTranslation(1), simTranslation(2));
+end
 
 %% Schleife über alle Videos im Ordner
 for vi = 1:numVideos
@@ -477,5 +532,50 @@ for vi = 1:numVideos
     % Plots bleiben offen; automatisch weiter zum nächsten Video
     if vi == numVideos
         fprintf('\nAlle %d Videos verarbeitet.\n', numVideos);
+    end
+end
+
+
+%% Lokale Funktion: Ordner-Szenario per Button auswählen
+function choice = selectFolderScenario()
+%SELECTFOLDERSCENARIO  Modales Fenster mit 3 Buttons (Ordner 1/2/3).
+%   Rückgabe: 1, 2 oder 3 je nach gedrücktem Button; [] falls das Fenster
+%   ohne Auswahl geschlossen wurde.
+
+    choice = [];
+
+    hFig = figure('Name', 'Ordner auswählen', 'NumberTitle', 'off', ...
+        'MenuBar', 'none', 'ToolBar', 'none', 'Resize', 'off', ...
+        'Position', [500 500 340 140]);
+
+    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Welcher Ordner?', ...
+        'Units', 'normalized', 'Position', [0.05 0.65 0.9 0.25], ...
+        'FontSize', 11, 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
+
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 1', ...
+        'Units', 'normalized', 'Position', [0.05 0.15 0.28 0.4], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(1));
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 2', ...
+        'Units', 'normalized', 'Position', [0.36 0.15 0.28 0.4], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(2));
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 3', ...
+        'Units', 'normalized', 'Position', [0.67 0.15 0.28 0.4], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(3));
+
+    set(hFig, 'CloseRequestFcn', @(s,e) closeFig());
+
+    uiwait(hFig);   % blockiert, bis ein Button gedrückt / Fenster geschlossen wird
+
+    % ---------- verschachtelte Funktionen ----------
+    function setChoice(c)
+        choice = c;
+        closeFig();
+    end
+
+    function closeFig()
+        if isvalid(hFig)
+            uiresume(hFig);
+            delete(hFig);
+        end
     end
 end
