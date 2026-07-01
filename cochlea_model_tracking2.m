@@ -14,11 +14,14 @@
 %      (jede Ecke einzeln skaliert -> Trapeze). Statisch -> einmal vorberechnet.
 %    - ALLE Frames chronologisch ab Frame 1 durchgehen. Pro Frame:
 %        * Background Subtraction
-%        * Trapeze als Suchflächen vom mittelpunktsnächsten Endpunkt Richtung
-%          Anfang durchgehen; im ersten Trapez mit schwarzen Pixeln (Elektrode)
-%          den Schwerpunkt der GRÖSSTEN schwarzen Fläche als Tip (grünes Kreuz).
+%        * Trapeze als Suchflächen durchgehen: NICHT mehr immer ab dem
+%          mittelpunktsnächsten Trajektorien-Ende, sondern ab dem Trapez,
+%          das searchAhead Trapeze näher an M liegt als die Zuweisung des
+%          VORHERIGEN Frames, von dort in derselben Richtung weiter bis zum
+%          Eingang; im ersten Trapez mit schwarzen Pixeln (Elektrode) den
+%          Schwerpunkt der GRÖSSTEN schwarzen Fläche als Tip (grünes Kreuz).
 %        * Findet kein Trapez schwarze Pixel, wird der Tip auf das rote Kreuz des
-%          ZULETZT durchsuchten Trajektorienpunkts gesetzt.
+%          Trajektorien-Eingangs gesetzt (= zuletzt durchsuchter Punkt).
 %    - Tip-Trajektorie (grüne Kreuze), Winkel über TimeStamp und Winkel über
 %      Kraft z anzeigen.
 % 4. In jedem Figure-Titel steht zusätzlich, welches V0x bearbeitet wird. Die
@@ -58,6 +61,15 @@ rectWidth   = 4;     % Grundbreite (tangential) bei Abstand 0 [px]
 rectHeight  = 10;    % Grundhöhe   (normal)     bei Abstand 0 [px]
 widthSlope  = 0.05;  % Breitenzuwachs je px Abstand zum Mittelpunkt [px/px]
 heightSlope = 0.4;   % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
+
+% --- Lokale Trapez-Suche (pro Frame) ---
+% Statt bei JEDEM Frame die komplette Trajektorie vom Mittelpunkt-Ende her zu
+% durchsuchen, startet die Suche ab dem Trapez, das searchAhead Trapeze näher
+% an M liegt als das zuletzt zugewiesene Trapez, und läuft von dort in der
+% ursprünglichen Richtung bis zum Trajektorien-Eingang weiter. Das reduziert
+% die Anzahl geprüfter Trapeze und verhindert Fehlzuweisungen an weit
+% entfernten (unplausiblen) Trapezen nahe M.
+searchAhead = 5;     % Trapeze "Vorsprung" Richtung M ab der letzten Zuweisung
 
 % --- Background-Subtraction-Parameter (wie in cochlea_model_tracking.m) ---
 % Gelten für Ordner 1 und Ordner 3 unverändert.
@@ -329,14 +341,17 @@ for vi = 1:numVideos
     dLast  = hypot(xs(end) - M(1), ys(end) - M(2));
     if dLast <= dFirst
         searchOrder = nP:-1:1;   % letzter Punkt ist näher an M -> von hinten nach vorne
+        stepDir = -1;
     else
         searchOrder = 1:nP;      % erster Punkt ist näher an M -> von vorne nach hinten
+        stepDir = 1;
     end
     idxLast = searchOrder(end);  % zuletzt durchsuchter Trajektorienpunkt (Fallback-Tip)
 
     %% 5. Alle Frames chronologisch durchgehen und Tip pro Frame bestimmen
     TipCoordinates2 = zeros(totalFrames, 2);   % [row, col] je Frame (grüne Kreuze)
     tipIdxFrame     = zeros(totalFrames, 1);   % Trajektorien-Index des Tips je Frame
+    prevFoundIdx    = idxLast;   % Anker für die lokale Suche (Start: Eingang)
 
     % --- optionale Live-Vorschau: einmal anlegen, danach nur aktualisieren ---
     if showPreview
@@ -375,11 +390,21 @@ for vi = 1:numVideos
         fg = bwareaopen(fg, minBlobSize);          % kleine Störpixel entfernen
         bwFrame = ~fg;                             % Elektrode = 0 (schwarz), Hintergrund = 1
 
+        % --- Lokale Suchreihenfolge: searchAhead Trapeze näher an M als die
+        % letzte Zuweisung, dann in ursprünglicher Richtung bis zum Eingang ---
+        startIdx = prevFoundIdx - searchAhead * stepDir;
+        startIdx = min(max(startIdx, 1), nP);
+        if stepDir == -1
+            localSearchOrder = startIdx:-1:1;
+        else
+            localSearchOrder = startIdx:1:nP;
+        end
+
         % --- Trapeze als Suchflächen durchgehen ---
         tipFound = false;
         foundIdx = idxLast;
         tipXY    = [NaN NaN];
-        for i = searchOrder
+        for i = localSearchOrder
             blackInside = fg & allMasks{i};        % schwarze Pixel im Trapez
             if any(blackInside(:))
                 cc = bwconncomp(blackInside);
@@ -400,6 +425,7 @@ for vi = 1:numVideos
 
         TipCoordinates2(fIdx, :) = [tipXY(2), tipXY(1)];   % [row, col]
         tipIdxFrame(fIdx) = foundIdx;                      % Trajektorien-Index des Tips
+        prevFoundIdx = foundIdx;                            % Anker für den nächsten Frame
 
         % --- Live-Vorschau aktualisieren ---
         if showPreview && isvalid(hFig)
