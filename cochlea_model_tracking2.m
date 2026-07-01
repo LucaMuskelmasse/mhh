@@ -52,6 +52,13 @@ showPreview = true;  % true = aktuellen Frame + Tip beim Durchlauf anzeigen
 % --- Glättungsparameter für Winkel-über-TimeStamp-Plot ---
 smoothSpan = 15;     % Breite des gleitenden Mittelwerts (Frames); ungerade empfohlen
 
+% --- Insertionstiefe ---
+% Trajektorienpunkte sind äquidistant (siehe create_trajectory.m) -> der
+% Fortschritt entlang der Trajektorie (0 = Eingang, 1 = anderes Ende) ergibt
+% sich direkt aus dem Punktindex. Multipliziert mit der tatsächlichen Tiefe
+% am Trajektorienende ergibt sich die Insertionstiefe in mm.
+insertionDepthMax = 28;   % tatsächliche Tiefe am Trajektorienende [mm]
+
 defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
 
 %% 1. ORDNER mit MP4-Videos auswählen
@@ -208,6 +215,7 @@ for vi = 1:numVideos
 
     %% 5. Alle Frames chronologisch durchgehen und Tip pro Frame bestimmen
     TipCoordinates2 = zeros(totalFrames, 2);   % [row, col] je Frame (grüne Kreuze)
+    tipIdxFrame     = zeros(totalFrames, 1);   % Trajektorien-Index des Tips je Frame
 
     % --- optionale Live-Vorschau: einmal anlegen, danach nur aktualisieren ---
     if showPreview
@@ -266,6 +274,7 @@ for vi = 1:numVideos
         end
 
         TipCoordinates2(fIdx, :) = [tipXY(2), tipXY(1)];   % [row, col]
+        tipIdxFrame(fIdx) = foundIdx;                      % Trajektorien-Index des Tips
 
         % --- Live-Vorschau aktualisieren ---
         if showPreview && isvalid(hFig)
@@ -311,6 +320,13 @@ for vi = 1:numVideos
     legend({'Tip (grüne Kreuze)', 'Tip-Linie', 'Mittelpunkt', 'Eingang', 'Referenzlinie'}, ...
         'Location', 'best');
     hold off;
+
+    %% 6b. Insertionstiefe je Frame (äquidistante Trajektorienpunkte -> linear)
+    % Fortschritt entlang der Trajektorie: 0 am Eingang (idxLast), 1 am
+    % anderen Ende (nächster Punkt zum Mittelpunkt). Da alle Trajektorien-
+    % punkte den gleichen Abstand haben, ergibt sich der Fortschritt direkt
+    % aus dem Punktindex des gefundenen Tips.
+    insertionDepth = abs(tipIdxFrame - idxLast) / (nP - 1) * insertionDepthMax;
 
     %% 7. Winkel zwischen Referenzlinie (Mittelpunkt->Eingang) und Tip-Linie
     % Vorzeichen: gegen den Uhrzeigersinn = positiv (y-Achse zeigt im Bild nach
@@ -377,6 +393,14 @@ for vi = 1:numVideos
         ylabel('Winkel [°]');
         title(sprintf('Winkel über TimeStamp (gegen Uhrzeigersinn positiv) (%s)', vLabel));
 
+        % --- Insertionstiefe über TimeStamp ---
+        figure('Name', ['Insertionstiefe über TimeStamp ' vLabel], 'NumberTitle', 'off');
+        plot(xT, insertionDepth(vT), 'b.-', 'LineWidth', 1.5, 'MarkerSize', 12);
+        grid on;
+        xlabel(xlabT);
+        ylabel('Insertionstiefe [mm]');
+        title(sprintf('Insertionstiefe über TimeStamp (%s)', vLabel));
+
         % --- Geglätteter Winkel über TimeStamp ---
         if haveCSV
             vT = valid & ~isnan(tsFrame);
@@ -437,7 +461,8 @@ for vi = 1:numVideos
             'force',         fzFrame, ...
             'forceSmoothed', forceSmooth, ...
             'angle',         angleUnwrapped, ...
-            'angleSmoothed', angleSmooth);
+            'angleSmoothed', angleSmooth, ...
+            'insertionDepth', insertionDepth);
 
         % Neben dem Video als <videoname>_results.mat speichern
         resFile = fullfile(vidDir, [vidName '_results.mat']);
