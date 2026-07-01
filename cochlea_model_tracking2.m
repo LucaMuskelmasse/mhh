@@ -29,6 +29,11 @@
 %      Skalierung, Translation; Parameter oben einstellbar) auf die geladene
 %      Trajektorie und den Mittelpunkt angewendet, bevor die Trapeze berechnet
 %      werden - die Trapeze sind dadurch automatisch mit transformiert.
+% 6. Danach ein weiteres Fenster mit 2 Buttons (Ein Video / Alle Videos):
+%    - Ein Video: EIN bestimmtes Video aus dem Ordner auswählen und nur
+%      dieses bearbeiten.
+%    - Alle Videos: wie bisher werden alle *_Camera1.mp4 im Ordner nacheinander
+%      bearbeitet.
 %
 % Es gibt KEINE Tip-Zuweisung per Suchradius und KEINE manuelle Korrektur mehr
 % (gegenüber cochlea_model_tracking.m bewusst entfernt). Background Subtraction
@@ -67,8 +72,8 @@ insertionDepthMax = 28;   % tatsächliche Tiefe am Trajektorienende [mm]
 
 % --- Standard-Startpfade für die 3 Ordner-Buttons (unten anpassen) ---
 defaultPath1 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
-defaultPath2 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
-defaultPath3 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';   % bitte anpassen
+defaultPath2 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\SlimStraigth_EA';
+defaultPath3 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\vers_Lichter';
 
 % --- Ähnlichkeitstransformation der Trajektorie (nur bei Ordner 3) ---
 % Bildet Trajektorie + Mittelpunkt vom Koordinatensystem, in dem sie erstellt
@@ -76,9 +81,9 @@ defaultPath3 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';   % bi
 % Skalierung erfolgen um den Mittelpunkt M (relativ zu M); anschließend wird
 % zusätzlich um simTranslation verschoben:
 %   [x'; y'] = simScale * R(simRotationDeg) * ([x;y] - M) + M + simTranslation'
-simRotationDeg = 0;         % Rotation um M [°], gegen den Uhrzeigersinn positiv
-simScale       = 1;         % Skalierungsfaktor (um M)
-simTranslation = [0, 0];    % [tx, ty] zusätzliche Verschiebung [px]
+simRotationDeg = 0;             % Rotation um M [°], gegen den Uhrzeigersinn positiv
+simScale       = 2;             % Skalierungsfaktor (um M)
+simTranslation = [230, 200];    % [tx, ty] zusätzliche Verschiebung [px]
 
 %% 0. Ordner-Szenario auswählen (Ordner 1 / 2 / 3)
 folderChoice = selectFolderScenario();
@@ -108,6 +113,24 @@ if isempty(listing)
 end
 [~, ord] = sort({listing.name});
 listing = listing(ord);
+
+%% 1b. Ein Video oder alle Videos verarbeiten?
+videoModeChoice = selectVideoMode();
+if isempty(videoModeChoice)
+    error('Kein Video-Modus ausgewählt');
+end
+if videoModeChoice == 1
+    % Ein einzelnes Video aus dem Ordner auswählen
+    [oneVidFile, ~] = uigetfile(fullfile(vidDir, '*_Camera1.mp4'), 'Video auswählen');
+    if isequal(oneVidFile, 0)
+        error('Kein Video ausgewählt');
+    end
+    idxSel = find(strcmp({listing.name}, oneVidFile), 1);
+    if isempty(idxSel)
+        error('Ausgewähltes Video nicht in der Liste gefunden: %s', oneVidFile);
+    end
+    listing = listing(idxSel);
+end
 numVideos = numel(listing);
 
 %% 2. EINE Trajektorie (.mat) auswählen - gilt für alle Videos
@@ -567,6 +590,48 @@ function choice = selectFolderScenario()
     uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 3', ...
         'Units', 'normalized', 'Position', [0.67 0.15 0.28 0.4], ...
         'FontWeight', 'bold', 'Callback', @(s,e) setChoice(3));
+
+    set(hFig, 'CloseRequestFcn', @(s,e) closeFig());
+
+    uiwait(hFig);   % blockiert, bis ein Button gedrückt / Fenster geschlossen wird
+
+    % ---------- verschachtelte Funktionen ----------
+    function setChoice(c)
+        choice = c;
+        closeFig();
+    end
+
+    function closeFig()
+        if isvalid(hFig)
+            uiresume(hFig);
+            delete(hFig);
+        end
+    end
+end
+
+
+%% Lokale Funktion: Ein Video oder alle Videos verarbeiten?
+function choice = selectVideoMode()
+%SELECTVIDEOMODE  Modales Fenster mit 2 Buttons (Ein Video / Alle Videos).
+%   Rückgabe: 1 = Ein Video, 2 = Alle Videos; [] falls das Fenster ohne
+%   Auswahl geschlossen wurde.
+
+    choice = [];
+
+    hFig = figure('Name', 'Video-Modus auswählen', 'NumberTitle', 'off', ...
+        'MenuBar', 'none', 'ToolBar', 'none', 'Resize', 'off', ...
+        'Position', [500 500 300 140]);
+
+    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Ein Video oder alle Videos?', ...
+        'Units', 'normalized', 'Position', [0.05 0.65 0.9 0.25], ...
+        'FontSize', 11, 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
+
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ein Video', ...
+        'Units', 'normalized', 'Position', [0.07 0.15 0.4 0.4], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(1));
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Alle Videos', ...
+        'Units', 'normalized', 'Position', [0.53 0.15 0.4 0.4], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(2));
 
     set(hFig, 'CloseRequestFcn', @(s,e) closeFig());
 
