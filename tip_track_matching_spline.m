@@ -8,16 +8,6 @@
 
 clear; clc; close all;
 
-%% Parameter: offizieller Messbereich der 3-Segment-Regression (laut Dokument)
-% Die Regression (As/Af-Bestimmung) ist über diesen Bereich definiert, d.h.
-% die festen Randwerte (f(measRangeMin)=0%, f(measRangeMax)=100%) werden dort
-% verankert statt am tatsächlichen Minimum/Maximum der gemessenen Temperatur.
-% Für Temperaturen AUSSERHALB der tatsächlich gemessenen Daten wird der
-% Funktionswert am Rand der gemessenen Daten konstant fortgesetzt, nicht
-% weiter der Randgerade folgend (siehe fitPlateauRampPlateau unten).
-measRangeMin = -25;   % °C, Untergrenze des offiziellen Messbereichs
-measRangeMax = 90;    % °C, Obergrenze des offiziellen Messbereichs
-
 %% 1.Select folder with default path
 defaultPath = 'M:\nascas2\Projects\MemoryCI 2.0\1 Dokumentation\AP01_Iterative Inlay-Entwicklung\AP 1.B BFR-Tests\Testergebnisse\2026-06-23-MV71-11-MV71-12';
 ImgPath = uigetdir(defaultPath, 'Select folder with images');
@@ -660,37 +650,18 @@ ylim([0 100]); grid on;
 
 
 %% Stückweise-lineare 3-Segment-Regression (Start 0, Ende 100, alle Segmente mit Steigung)
-% Die Regression selbst ist wie bisher an den TATSÄCHLICH gemessenen Daten
-% verankert (0% beim ersten, 100% beim letzten Messpunkt) - genau DORT, wo
-% echte Daten vorliegen. Der offizielle Messbereich (measRangeMin/
-% measRangeMax) wird NICHT für die Regression selbst verwendet, sondern nur,
-% um den Funktionswert links vom ersten Messpunkt bis measRangeMin und
-% rechts vom letzten Messpunkt bis measRangeMax konstant aufzufüllen.
 [params, predictFcn] = fitPlateauRampPlateau(measTemp(1:end-1), prog(1:end-1)*100);
-
-% Für die Darstellung in 3 Teile aufteilen, damit klar erkennbar ist, was
-% die eigentliche 3-Segment-Regression ist und was konstant angefügt wurde.
-xLeft  = linspace(measRangeMin, params.xmin, 100);
-xCore  = linspace(params.xmin, params.xmax, 400);
-xRight = linspace(params.xmax, measRangeMax, 100);
-yLeft  = predictFcn(xLeft);
-yCore  = predictFcn(xCore);
-yRight = predictFcn(xRight);
+y_fit = predictFcn(measTemp(1:end-1));
 
 figure(6);
 plot(measTemp(1:end-1), prog(1:end-1)*100, 'LineWidth', 2, 'Color', [0.8 0.2 0.6], 'LineStyle','--');
 xlabel('Temperatur [°C]');
 ylabel('Zurückgelegter Anteil der Trajektorie [%]');
 title('Fortschritt des Tips entlang der Trajektorie über die Temperatur');
-xlim([measRangeMin measRangeMax]); ylim([0 100]); grid on;
+ylim([0 100]); grid on;
 hold on;
-plot(xLeft,  yLeft,  'LineWidth', 2, 'Color', [0.5 0.5 0.5], 'LineStyle', ':');
-plot(xCore,  yCore,  'LineWidth', 2, 'Color', [0.2 0.8 0.6]);
-plot(xRight, yRight, 'LineWidth', 2, 'Color', [0.5 0.5 0.5], 'LineStyle', ':');
+plot(measTemp(1:end-1), y_fit, 'LineWidth', 2, 'Color', [0.2 0.8 0.6]);
 hold off;
-legend({'Gemessene Daten', 'Konstante Fortsetzung (< Messdaten)', ...
-    'Regression (3 Segmente)', 'Konstante Fortsetzung (> Messdaten)'}, ...
-    'Location', 'best');
 
 fprintf('As = %.4f\n', params.x1);
 fprintf('Af = %.4f\n', params.x2);
@@ -784,12 +755,9 @@ end
 function [params, predictFcn] = fitPlateauRampPlateau(x, y, c1, c2)
 %FITPLATEAURAMPPLATEAU  Stueckweise-lineare 3-Segment-Regression mit festen Randwerten.
 %   Fittet eine STETIGE, stueckweise lineare Funktion mit DREI linearen
-%   Segmenten an die TATSAECHLICH gemessenen Daten (x,y). Alle drei Segmente
-%   duerfen eine Steigung haben; festgehalten werden nur die Randwerte:
-%   f(xmin) = c1 und f(xmax) = c2 (Default: c1 = 0, c2 = 100), wobei
-%   xmin/xmax das Minimum/Maximum der gemessenen Daten x sind (NICHT ein
-%   offizieller Messbereich - der wird nur ausserhalb dieser Funktion fuer
-%   die konstante Fortsetzung der Kurve verwendet, siehe Hauptskript).
+%   Segmenten an die Daten (x,y). Alle drei Segmente duerfen eine Steigung
+%   haben; festgehalten werden nur die Randwerte: f(xmin) = c1 und
+%   f(xmax) = c2 (Default: c1 = 0, c2 = 100).
 %
 %   Das Modell verlaeuft linear durch die Stuetzpunkte
 %       (xmin, c1) - (x1, y1) - (x2, y2) - (xmax, c2)
@@ -797,16 +765,10 @@ function [params, predictFcn] = fitPlateauRampPlateau(x, y, c1, c2)
 %   Bei festen Knickstellen sind y1, y2 per linearer Ausgleichsrechnung
 %   exakt loesbar; optimiert werden daher nur die Knickstellen x1 < x2.
 %
-%   predictFcn haelt den Funktionswert AUSSERHALB von [xmin, xmax] KONSTANT
-%   (= c1 bzw. c2), statt linear zu extrapolieren - fuer Anfragen ausserhalb
-%   der gemessenen Daten (z.B. bis zum offiziellen Messbereich -25..90°C),
-%   siehe modelEvalClamped.
-%
 %   [params, predictFcn] = fitPlateauRampPlateau(x, y)        % c1=0, c2=100
 %   [params, predictFcn] = fitPlateauRampPlateau(x, y, c1, c2)
-%     params     : struct mit c1, c2, xmin, xmax, x1, x2, y1, y2, m1, m2, m3, sse, r2
-%     predictFcn : Function-Handle, predictFcn(xq) -> Modellwerte (ausserhalb
-%                  [xmin,xmax] konstant fortgesetzt)
+%     params     : struct mit c1, c2, x1, x2, y1, y2, m1, m2, m3, sse, r2
+%     predictFcn : Function-Handle, predictFcn(xq) -> Modellwerte
 
     if nargin < 3 || isempty(c1), c1 = 0;   end
     if nargin < 4 || isempty(c2), c2 = 100; end
@@ -845,11 +807,11 @@ function [params, predictFcn] = fitPlateauRampPlateau(x, y, c1, c2)
     sst = sum((y - mean(y)).^2);
     r2  = 1 - sse/sst;
 
-    params = struct('c1',c1, 'c2',c2, 'xmin',xmin, 'xmax',xmax, 'x1',x1, 'x2',x2, ...
+    params = struct('c1',c1, 'c2',c2, 'x1',x1, 'x2',x2, ...
                     'y1',y1, 'y2',y2, 'm1',m1, 'm2',m2, 'm3',m3, ...
                     'sse',sse, 'r2',r2);
 
-    predictFcn = @(xq) modelEvalClamped(xq, xmin, xmax, x1, x2, c1, c2, y1, y2);
+    predictFcn = @(xq) modelEval(xq, xmin, xmax, x1, x2, c1, c2, y1, y2);
 end
 
 % ----------------------------------------------------------------------
@@ -859,16 +821,6 @@ function yhat = modelEval(x, xmin, xmax, x1, x2, c1, c2, y1, y2)
     xk = [xmin, x1, x2, xmax];
     yk = [c1,   y1, y2, c2  ];
     yhat = interp1(xk, yk, x, 'linear', 'extrap');
-end
-
-function yhat = modelEvalClamped(x, xmin, xmax, x1, x2, c1, c2, y1, y2)
-% Wie modelEval, aber ausserhalb von [xmin,xmax] (= Bereich der tatsaechlich
-% gemessenen Daten) wird die Anfrage auf den naechsten Rand geklemmt -> der
-% Funktionswert bleibt dort konstant (= c1 bzw. c2), statt weiter linear zu
-% extrapolieren.
-    x = x(:);
-    xClamped = min(max(x, xmin), xmax);
-    yhat = modelEval(xClamped, xmin, xmax, x1, x2, c1, c2, y1, y2);
 end
 
 function [sse, y1, y2] = sseFixed(x, y, x1, x2, xmin, xmax, c1, c2)
