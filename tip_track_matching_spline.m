@@ -641,6 +641,26 @@ for k = 1:numel(measX)
     prog(k) = pRef(j);
 end
 
+%Definitionsbereich erweitert:
+low_i = 0;
+high_i = 0;
+
+while measTemp(1) > -25
+    measTemp = [measTemp(1) - 1; measTemp];
+    low_i = low_i + 1;
+end
+
+while measTemp(end) < 90
+    measTemp = [measTemp; measTemp(end) + 1];
+    high_i = high_i + 1;
+end
+
+prog = [zeros(low_i,1); prog; ones(high_i,1)];
+
+
+
+
+
 figure(5);
 plot(measTemp(1:end-1), prog(1:end-1)*100, 'LineWidth', 2, 'Color', [0.8 0.2 0.6]);
 xlabel('Temperatur [°C]');
