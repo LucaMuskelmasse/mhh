@@ -37,6 +37,8 @@
 %      echter Frame zuerst). Der Hintergrund kommt daher aus den letzten
 %      echten Frames, die CSV-Daten (TimeStamp/Kraft) werden an die
 %      Wiedergabe-Position gebunden -> die Zeitachse läuft vorwärts.
+%      Tracking/Plot beginnen erst ab Wiedergabe-Position startFrame4
+%      (Zählung nach dem Umkehren); frühere Frames werden übersprungen.
 % 6. Danach ein weiteres Fenster mit 2 Buttons (Ein Video / Alle Videos):
 %    - Ein Video: EIN bestimmtes Video aus dem Ordner auswählen und nur
 %      dieses bearbeiten.
@@ -93,6 +95,13 @@ numBgFrames4 = 5;     % Anzahl (in Wiedergaberichtung erster) elektrodenfreier F
 fgThreshold4 = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
 minBlobSize4 = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
 
+% --- Startframe der Wiedergabe NUR für Ordner 4 ---
+% Zählung NACH dem Umkehren: Wiedergabe-Position 1 = letzter echter Frame.
+% Tracking/Plot beginnen erst ab dieser Wiedergabe-Position (frühere Frames
+% werden übersprungen). Der Hintergrund wird davon NICHT beeinflusst (er kommt
+% weiter aus den ersten numBgFrames4 elektrodenfreien Wiedergabe-Frames).
+startFrame4 = 1600;   % erste ausgewertete Wiedergabe-Position bei Ordner 4
+
 % --- Live-Vorschau während des Durchlaufs ---
 showPreview = true;  % true = aktuellen Frame + Tip beim Durchlauf anzeigen
 
@@ -144,6 +153,7 @@ if isempty(folderChoice)
     error('Kein Ordner-Szenario ausgewählt');
 end
 reverseVideo = false;   % Standard: Frames in normaler Reihenfolge verarbeiten
+startPos     = 1;       % Standard: ab erster (Wiedergabe-)Position auswerten
 switch folderChoice
     case 1
         defaultPath = defaultPath1;
@@ -174,6 +184,7 @@ switch folderChoice
         simScaleActive       = simScale4;
         simTranslationActive = simTranslation4;
         reverseVideo = true;
+        startPos     = startFrame4;
 end
 
 %% 1. ORDNER mit MP4-Videos auswählen
@@ -392,6 +403,15 @@ for vi = 1:numVideos
     tipIdxFrame     = zeros(totalFrames, 1);   % Trajektorien-Index des Tips je Frame
     prevFoundIdx    = idxLast;   % Anker für die lokale Suche (Start: Eingang)
 
+    % Erste auszuwertende Wiedergabe-Position (bei Ordner 4 = startFrame4).
+    % Frühere Positionen werden übersprungen und bleiben ungültig (0) -> sie
+    % erscheinen später nicht im Plot. Auf gültigen Bereich begrenzen.
+    startPosThis = min(max(round(startPos), 1), totalFrames);
+    if startPosThis > 1
+        fprintf('[%s] Auswertung ab Wiedergabe-Position %d (von %d).\n', ...
+            vLabel, startPosThis, totalFrames);
+    end
+
     % --- optionale Live-Vorschau: einmal anlegen, danach nur aktualisieren ---
     if showPreview
         hFig = figure('Name', ['Tip-Tracking ' vLabel], 'NumberTitle', 'off');
@@ -414,7 +434,7 @@ for vi = 1:numVideos
         hold(hAx, 'off');
     end
 
-    for fIdx = 1:totalFrames
+    for fIdx = startPosThis:totalFrames
         % fIdx = Wiedergabe-Position; frameOrder(fIdx) = tatsächliche Frame-Nr.
         % (bei Ordner 4 rückwärts). Alle Ergebnis-Arrays werden über die
         % Wiedergabe-Position indiziert -> chronologisch in Wiedergaberichtung.
@@ -505,9 +525,11 @@ for vi = 1:numVideos
     xlabel('Column (x)');
     ylabel('Row (y)');
 
-    % grüne Kreuze (Tips pro Frame) + verbindende Linie
-    plot(TipCoordinates2(:,2), TipCoordinates2(:,1), 'gx', 'MarkerSize', 8, 'LineWidth', 1.5);
-    plot(TipCoordinates2(:,2), TipCoordinates2(:,1), 'g-', 'LineWidth', 1.0);
+    % grüne Kreuze (Tips pro Frame) + verbindende Linie. Übersprungene Frames
+    % (vor startFrame4) bleiben [0,0] und werden hier ausgeblendet.
+    validTip = any(TipCoordinates2 ~= 0, 2);
+    plot(TipCoordinates2(validTip,2), TipCoordinates2(validTip,1), 'gx', 'MarkerSize', 8, 'LineWidth', 1.5);
+    plot(TipCoordinates2(validTip,2), TipCoordinates2(validTip,1), 'g-', 'LineWidth', 1.0);
 
     % Mittelpunkt + Eingang (= entferntes Trajektorienende) + Referenzlinie
     cochleaEntrance = [xs(idxLast), ys(idxLast)];   % [x, y] = [col, row]
@@ -524,6 +546,7 @@ for vi = 1:numVideos
     % punkte den gleichen Abstand haben, ergibt sich der Fortschritt direkt
     % aus dem Punktindex des gefundenen Tips.
     insertionDepth = abs(tipIdxFrame - idxLast) / (nP - 1) * insertionDepthMax;
+    insertionDepth(tipIdxFrame == 0) = NaN;   % übersprungene Frames -> NaN
 
     %% 7. Winkel zwischen Referenzlinie (Mittelpunkt->Eingang) und Tip-Linie
     % Vorzeichen: gegen den Uhrzeigersinn = positiv (y-Achse zeigt im Bild nach
