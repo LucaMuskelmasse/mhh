@@ -3,8 +3,10 @@
 % Created on: 2019-07-05
 %
 % Erweiterung: 7 gleichmäßig (nach Bogenlänge) verteilte Punkte werden auf
-% eine Spline durch die Geometrie gelegt, die Krümmung an jedem Punkt
-% berechnet, gemittelt und ausgegeben.
+% die Geometrie gelegt und die Krümmung an jedem Punkt berechnet, gemittelt
+% und ausgegeben. Die Krümmungsberechnung ist bewusst IDENTISCH zu
+% kruemung_hai.m, damit die mittlere Krümmung direkt als Normierung
+% (max_kappa) für kruemung_hai.m verwendet werden kann.
 
 clear all;
 close all;
@@ -82,52 +84,60 @@ figure;
 plot(lx,ly,'.')
 
 
-%% 7 gleichmäßig verteilte Punkte auf der Spline + mittlere Krümmung
-nPts7 = 7;    % gewünschte Anzahl gleichmäßig verteilter Punkte
+%% 7 gleichmäßig verteilte Punkte + mittlere Krümmung
+% Die Krümmung wird EXAKT wie in kruemung_hai.m (Zeilen 115-129) berechnet,
+% damit die hier ermittelte mittlere Krümmung direkt als Normierung (max_kappa)
+% für kruemung_hai.m taugt: 7 äquidistante Punkte (lineares Resampling),
+% Gauß-Glättung, gradient DIREKT auf den 7 Punkten, kappa = |x'y''-y'x''| /
+% (x'^2+y'^2)^1.5, dann Mittelwert (omitnan).
+N = 7;         % gleiche Punktzahl wie in kruemung_hai.m
 
-% --- Bogenlänge entlang der Geometrie (streng monoton -> für interp1/spline) ---
-X = lx(:);  Y = ly(:);
-sRaw = [0; cumsum(hypot(diff(X), diff(Y)))];   % kumulierte Bogenlänge
-[sRaw, iu] = unique(sRaw, 'stable');           % doppelte Stützstellen entfernen
+% Pixel pro mm des Videos (aus Kalibrierung). 1 = keine Umrechnung.
+% WICHTIG: echten Kalibrierwert eintragen, damit die Inlay-Krümmung im selben
+% Pixel-Maßstab wie kruemung_hai (max_kappa) liegt. Krümmung ist 1/Länge, sie
+% skaliert also mit dem Maßstab -> darf nicht weggelassen werden.
+pxPerMm = 1;
+
+% Geometrie in den Pixel-Maßstab des Videos bringen (mm -> px)
+X = lx(:) * pxPerMm;
+Y = ly(:) * pxPerMm;
+
+% Bogenlänge als monotone Stützstelle (Analogon zur Geodät-Distanz d in
+% kruemung_hai). Doppelte Punkte an Bogenübergängen -> unique entfernt sie.
+d = [0; cumsum(hypot(diff(X), diff(Y)))];
+[d, iu] = unique(d);          % strikt monoton -> für interp1
 X = X(iu);  Y = Y(iu);
 
-% --- Dichte, glatte Spline-Kurve entlang der Bogenlänge ---
-% Die Kurve wird als Spline über die Bogenlänge parametrisiert, damit sich
-% Ableitungen (und daraus die Krümmung) stabil berechnen lassen.
-nDense = 5000;
-sDense = linspace(0, sRaw(end), nDense).';
-xDense = spline(sRaw, X, sDense);
-yDense = spline(sRaw, Y, sDense);
+% --- exakt wie kruemung_hai.m ---
+s  = linspace(0, d(end), N);  % 7 gleiche Abstände (Zeilenvektor)
+xs = interp1(d, X, s);        % LINEAR (Default), wie kruemung_hai
+ys = interp1(d, Y, s);
 
-% --- Krümmung entlang der dichten Kurve (uniformes ds -> gradient) ---
-% kappa = |x' y'' - y' x''| / (x'^2 + y'^2)^(3/2)
-ds  = sDense(2) - sDense(1);
-dx  = gradient(xDense, ds);
-dy  = gradient(yDense, ds);
-ddx = gradient(dx, ds);
-ddy = gradient(dy, ds);
-kappaDense = abs(dx.*ddy - dy.*ddx) ./ (dx.^2 + dy.^2).^(1.5);
+xs = smoothdata(xs, 'gaussian', 2);
+ys = smoothdata(ys, 'gaussian', 2);
 
-% --- 7 gleichmäßig (nach Bogenlänge) verteilte Punkte ---
-sSeven = linspace(0, sRaw(end), nPts7).';
-xSeven = interp1(sDense, xDense, sSeven);
-ySeven = interp1(sDense, yDense, sSeven);
-kappaSeven = interp1(sDense, kappaDense, sSeven);   % Krümmung an jedem Punkt
+dx  = gradient(xs);
+dy  = gradient(ys);
+ddx = gradient(dx);
+ddy = gradient(dy);
 
-meanKappa = mean(kappaSeven);
+kappa = (dx.*ddy - dy.*ddx) ./ (dx.^2 + dy.^2).^(1.5);
+kappa = abs(kappa);
+
+meanKappa = mean(kappa, 'omitnan');   % = Wert für max_kappa in kruemung_hai.m
 
 % --- Ausgabe ---
-fprintf('\nKrümmung an %d gleichmäßig verteilten Punkten:\n', nPts7);
-for k = 1:nPts7
-    fprintf('  Punkt %d  (s = %6.3f mm):  kappa = %.4f 1/mm  (r = %.3f mm)\n', ...
-        k, sSeven(k), kappaSeven(k), 1/kappaSeven(k));
+fprintf('\nKrümmung an %d Punkten (Methode wie kruemung_hai.m, Maßstab %.4f px/mm):\n', ...
+    N, pxPerMm);
+for k = 1:N
+    fprintf('  Punkt %d:  kappa = %.4f 1/px\n', k, kappa(k));
 end
-fprintf('Mittlere Krümmung (%d Punkte): %.4f 1/mm\n', nPts7, meanKappa);
+fprintf('Mittlere Krümmung (= max_kappa für kruemung_hai.m): %.4f 1/px\n', meanKappa);
 
-% --- Punkte im Plot markieren ---
+% --- 7 Punkte im Plot markieren (in mm-Koordinaten für die Anzeige) ---
 hold on;
-plot(xSeven, ySeven, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
+plot(xs/pxPerMm, ys/pxPerMm, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
 axis equal; grid on;
-title(sprintf('Inlay-Geometrie mit %d Punkten, mittlere Krümmung = %.4f 1/mm', ...
-    nPts7, meanKappa));
+title(sprintf('Inlay: mittlere Krümmung = %.4f 1/px  (%.4f px/mm)', ...
+    meanKappa, pxPerMm));
 hold off;
