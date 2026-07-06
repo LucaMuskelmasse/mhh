@@ -26,13 +26,17 @@
 %      Kraft z anzeigen.
 % 4. In jedem Figure-Titel steht zusätzlich, welches V0x bearbeitet wird. Die
 %    Plots bleiben offen; die Videos laufen automatisch nacheinander durch.
-% 5. Vor der Ordnerauswahl öffnet sich ein Fenster mit 3 Buttons (Ordner 1/2/3):
+% 5. Vor der Ordnerauswahl öffnet sich ein Fenster mit 4 Buttons (Ordner 1/2/3/4):
 %    - Ordner 1: Verarbeitung wie oben beschrieben, unverändert.
-%    - Ordner 2 und Ordner 3: zusätzlich wird eine Ähnlichkeitstransformation
+%    - Ordner 2, 3 und 4: zusätzlich wird eine Ähnlichkeitstransformation
 %      (Rotation, Skalierung, Translation; Parameter oben einstellbar, JEWEILS
-%      EIGENE für Ordner 2 und Ordner 3) auf die geladene Trajektorie und den
+%      EIGENE für Ordner 2, 3 und 4) auf die geladene Trajektorie und den
 %      Mittelpunkt angewendet, bevor die Trapeze berechnet werden - die
 %      Trapeze sind dadurch automatisch mit transformiert.
+%    - Ordner 4: die Videos werden zusätzlich RÜCKWÄRTS abgespielt (letzter
+%      echter Frame zuerst). Der Hintergrund kommt daher aus den letzten
+%      echten Frames, die CSV-Daten (TimeStamp/Kraft) werden an die
+%      Wiedergabe-Position gebunden -> die Zeitachse läuft vorwärts.
 % 6. Danach ein weiteres Fenster mit 2 Buttons (Ein Video / Alle Videos):
 %    - Ein Video: EIN bestimmtes Video aus dem Ordner auswählen und nur
 %      dieses bearbeiten.
@@ -41,8 +45,8 @@
 % 7. GANZ ZU BEGINN (vor allen anderen Fenstern) ein Fenster mit 2 Buttons
 %    (RGB Image / BW Maske) zum Testen der Background-Subtraction-Parameter:
 %    legt fest, ob die Live-Vorschau (Abschnitt 5) das RGB-Bild oder die
-%    binäre Vordergrundmaske zeigt. Ordner 2 verwendet dabei eigene
-%    Background-Subtraction-Parameter (numBgFrames2/fgThreshold2/minBlobSize2),
+%    binäre Vordergrundmaske zeigt. Ordner 2 und Ordner 4 verwenden dabei
+%    eigene Background-Subtraction-Parameter (numBgFrames2.../numBgFrames4...),
 %    Ordner 1 und 3 die ursprünglichen (numBgFrames/fgThreshold/minBlobSize).
 %
 % Es gibt KEINE Tip-Zuweisung per Suchradius und KEINE manuelle Korrektur mehr
@@ -82,6 +86,13 @@ numBgFrames2 = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hinter
 fgThreshold2 = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
 minBlobSize2 = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
 
+% --- Background-Subtraction-Parameter NUR für Ordner 4 (gesondert einstellbar) ---
+% Ordner-4-Videos werden RÜCKWÄRTS abgespielt -> die elektrodenfreien Frames
+% (Hintergrund) sind am VideoENDE (= Anfang der Rückwärts-Wiedergabe).
+numBgFrames4 = 5;     % Anzahl (in Wiedergaberichtung erster) elektrodenfreier Frames
+fgThreshold4 = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
+minBlobSize4 = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
+
 % --- Live-Vorschau während des Durchlaufs ---
 showPreview = true;  % true = aktuellen Frame + Tip beim Durchlauf anzeigen
 
@@ -95,10 +106,11 @@ smoothSpan = 15;     % Breite des gleitenden Mittelwerts (Frames); ungerade empf
 % am Trajektorienende ergibt sich die Insertionstiefe in mm.
 insertionDepthMax = 28;   % tatsächliche Tiefe am Trajektorienende [mm]
 
-% --- Standard-Startpfade für die 3 Ordner-Buttons (unten anpassen) ---
+% --- Standard-Startpfade für die 4 Ordner-Buttons (unten anpassen) ---
 defaultPath1 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
 defaultPath2 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\SlimStraigth_EA';
 defaultPath3 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\vers_Lichter';
+defaultPath4 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\eval';
 
 % --- Ähnlichkeitstransformation der Trajektorie (bei Ordner 2 bzw. Ordner 3) ---
 % Bildet Trajektorie + Mittelpunkt vom Koordinatensystem, in dem sie erstellt
@@ -115,6 +127,10 @@ simRotationDeg3 = 0;             % Rotation um M [°] für Ordner 3, gegen den U
 simScale3       = 2;             % Skalierungsfaktor (um M) für Ordner 3
 simTranslation3 = [230, 200];    % [tx, ty] zusätzliche Verschiebung [px] für Ordner 3
 
+simRotationDeg4 = 0;             % Rotation um M [°] für Ordner 4, gegen den Uhrzeigersinn positiv
+simScale4       = 1;             % Skalierungsfaktor (um M) für Ordner 4
+simTranslation4 = [0, 0];        % [tx, ty] zusätzliche Verschiebung [px] für Ordner 4
+
 %% -1. Vorschau-Anzeige auswählen (RGB Image / BW Maske) - zum Testen der
 %      Background-Subtraction-Parameter (v.a. für Ordner 2)
 previewMode = selectPreviewMode();
@@ -122,11 +138,12 @@ if isempty(previewMode)
     error('Kein Vorschau-Modus ausgewählt');
 end
 
-%% 0. Ordner-Szenario auswählen (Ordner 1 / 2 / 3)
+%% 0. Ordner-Szenario auswählen (Ordner 1 / 2 / 3 / 4)
 folderChoice = selectFolderScenario();
 if isempty(folderChoice)
     error('Kein Ordner-Szenario ausgewählt');
 end
+reverseVideo = false;   % Standard: Frames in normaler Reihenfolge verarbeiten
 switch folderChoice
     case 1
         defaultPath = defaultPath1;
@@ -146,6 +163,17 @@ switch folderChoice
         simRotationDegActive = simRotationDeg3;
         simScaleActive       = simScale3;
         simTranslationActive = simTranslation3;
+    case 4
+        defaultPath = defaultPath4;
+        % Ordner 4: eigene Background-Subtraction-Parameter + eigene
+        % Ähnlichkeitstransformation; Videos werden RÜCKWÄRTS abgespielt.
+        numBgFrames = numBgFrames4;
+        fgThreshold = fgThreshold4;
+        minBlobSize = minBlobSize4;
+        simRotationDegActive = simRotationDeg4;
+        simScaleActive       = simScale4;
+        simTranslationActive = simTranslation4;
+        reverseVideo = true;
 end
 
 %% 1. ORDNER mit MP4-Videos auswählen
@@ -200,7 +228,7 @@ end
 TipCoordinates = S.TipCoordinates;   % [row, col] = [y, x]  (für alle Videos)
 M = S.cochleaCenter;                 % [x, y] = [col, row]   (für alle Videos)
 
-%% 2c. Bei Ordner 2 oder Ordner 3: Ähnlichkeitstransformation auf Trajektorie + Mittelpunkt
+%% 2c. Bei Ordner 2, 3 oder 4: Ähnlichkeitstransformation auf Trajektorie + Mittelpunkt
 % Rotation und Skalierung erfolgen um den Mittelpunkt M (relativ zu M) ->
 % M selbst bewegt sich dabei nicht, wird aber anschließend wie die Trajektorie
 % um simTranslationActive verschoben. Die Trapeze werden weiter unten aus
@@ -208,7 +236,7 @@ M = S.cochleaCenter;                 % [x, y] = [col, row]   (für alle Videos)
 % dadurch automatisch mit transformiert. Die Trapez-Grundmaße
 % (rectWidth/rectHeight) werden mit simScaleActive skaliert, damit sie im
 % neuen Maßstab weiterhin der tatsächlichen Elektrodengröße entsprechen.
-if folderChoice == 2 || folderChoice == 3
+if folderChoice == 2 || folderChoice == 3 || folderChoice == 4
     theta = deg2rad(simRotationDegActive);
     Rmat  = [cos(theta) -sin(theta); sin(theta) cos(theta)];
 
@@ -273,14 +301,25 @@ for vi = 1:numVideos
         warning('[%s] Keine CSV gefunden: %s -> Winkel ersatzweise über Frame.', vLabel, csvFile);
     end
 
-    %% 3. Hintergrund-Referenz aus den ersten Frames mitteln
+    %% 3. Hintergrund-Referenz aus den ersten (Wiedergabe-)Frames mitteln
     v = VideoReader(videoFullPath);
     totalFrames = v.NumFrames;
+
+    % Wiedergabe-Reihenfolge der Frames: bei Ordner 4 rückwärts (letzter echter
+    % Frame zuerst), sonst normal. frameOrder(p) = tatsächliche Video-Frame-Nr.
+    % zur Wiedergabe-Position p. Der Hintergrund kommt aus den ersten nbg
+    % Frames der WIEDERGABE (bei Rückwärts = die letzten echten Frames, dort
+    % ist die Elektrode noch nicht/nicht mehr im Bild).
+    if reverseVideo
+        frameOrder = totalFrames:-1:1;
+    else
+        frameOrder = 1:totalFrames;
+    end
 
     nbg = min(max(round(numBgFrames), 1), totalFrames);
     bgAccum = zeros(v.Height, v.Width);
     for b = 1:nbg
-        f = read(v, b);
+        f = read(v, frameOrder(b));
         if size(f,3) == 1
             f = repmat(f, [1 1 3]);
         end
@@ -376,7 +415,10 @@ for vi = 1:numVideos
     end
 
     for fIdx = 1:totalFrames
-        img = read(v, fIdx);
+        % fIdx = Wiedergabe-Position; frameOrder(fIdx) = tatsächliche Frame-Nr.
+        % (bei Ordner 4 rückwärts). Alle Ergebnis-Arrays werden über die
+        % Wiedergabe-Position indiziert -> chronologisch in Wiedergaberichtung.
+        img = read(v, frameOrder(fIdx));
         if size(img,3) == 1
             img = repmat(img, [1 1 3]);
         end
@@ -638,29 +680,32 @@ end
 
 %% Lokale Funktion: Ordner-Szenario per Button auswählen
 function choice = selectFolderScenario()
-%SELECTFOLDERSCENARIO  Modales Fenster mit 3 Buttons (Ordner 1/2/3).
-%   Rückgabe: 1, 2 oder 3 je nach gedrücktem Button; [] falls das Fenster
+%SELECTFOLDERSCENARIO  Modales Fenster mit 4 Buttons (Ordner 1/2/3/4).
+%   Rückgabe: 1, 2, 3 oder 4 je nach gedrücktem Button; [] falls das Fenster
 %   ohne Auswahl geschlossen wurde.
 
     choice = [];
 
     hFig = figure('Name', 'Ordner auswählen', 'NumberTitle', 'off', ...
         'MenuBar', 'none', 'ToolBar', 'none', 'Resize', 'off', ...
-        'Position', [500 500 340 140]);
+        'Position', [500 500 440 140]);
 
     uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Welcher Ordner?', ...
         'Units', 'normalized', 'Position', [0.05 0.65 0.9 0.25], ...
         'FontSize', 11, 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
 
     uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 1', ...
-        'Units', 'normalized', 'Position', [0.05 0.15 0.28 0.4], ...
+        'Units', 'normalized', 'Position', [0.04 0.15 0.21 0.4], ...
         'FontWeight', 'bold', 'Callback', @(s,e) setChoice(1));
     uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 2', ...
-        'Units', 'normalized', 'Position', [0.36 0.15 0.28 0.4], ...
+        'Units', 'normalized', 'Position', [0.28 0.15 0.21 0.4], ...
         'FontWeight', 'bold', 'Callback', @(s,e) setChoice(2));
     uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 3', ...
-        'Units', 'normalized', 'Position', [0.67 0.15 0.28 0.4], ...
+        'Units', 'normalized', 'Position', [0.52 0.15 0.21 0.4], ...
         'FontWeight', 'bold', 'Callback', @(s,e) setChoice(3));
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 4', ...
+        'Units', 'normalized', 'Position', [0.76 0.15 0.21 0.4], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(4));
 
     set(hFig, 'CloseRequestFcn', @(s,e) closeFig());
 
