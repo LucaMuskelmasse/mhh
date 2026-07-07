@@ -63,6 +63,28 @@ MODEL_CFGS = {
 }
 
 
+def imwrite_unicode(path, img, params=None):
+    """Wie cv2.imwrite, aber sicher fuer Windows-Pfade mit Sonderzeichen
+    (z.B. Umlauten) und/oder Vorwaerts-Slashes.
+
+    cv2.imwrite() nutzt unter Windows intern eine aeltere fopen()-Route, die
+    bei solchen Pfaden bei manchen OpenCV-Builds STILL fehlschlaegt (gibt nur
+    False zurueck, wirft KEINE Exception) - Dateien fehlen dann kommentarlos.
+    Hier wird stattdessen mit cv2.imencode() ein Byte-Array erzeugt und ueber
+    Pythons eingebautes open() geschrieben (Windows-Wide-Char-API, robust).
+
+    Wirft RuntimeError, wenn Encodierung oder Schreiben fehlschlaegt.
+    """
+    ext = os.path.splitext(path)[1]
+    ok, buf = cv2.imencode(ext, img, params or [])
+    if not ok:
+        raise RuntimeError(f"cv2.imencode fehlgeschlagen fuer: {path}")
+    with open(path, "wb") as f:
+        f.write(buf.tobytes())
+    if not os.path.isfile(path):
+        raise RuntimeError(f"Datei wurde nicht geschrieben: {path}")
+
+
 def select_video():
     """Datei-Dialog wie uigetfile in MATLAB."""
     root = tk.Tk()
@@ -89,7 +111,7 @@ def extract_frames(video_path, frames_dir):
         ok, frame = cap.read()
         if not ok:
             break
-        cv2.imwrite(
+        imwrite_unicode(
             os.path.join(frames_dir, f"{idx:05d}.jpg"),
             frame,
             [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY],
@@ -219,10 +241,10 @@ def main():
     except ImportError as exc:
         sys.exit(f"Fehlendes Paket: {exc}\nBitte Einrichtung laut README_SAM2.md durchfuehren.")
 
-    video_path = select_video()
+    video_path = os.path.normpath(select_video())
     vid_dir = os.path.dirname(video_path)
     vid_name = os.path.splitext(os.path.basename(video_path))[0]
-    out_dir = os.path.join(vid_dir, f"{vid_name}_sam2_masks")
+    out_dir = os.path.normpath(os.path.join(vid_dir, f"{vid_name}_sam2_masks"))
 
     # --- Device + Modellgroesse ---
     if torch.cuda.is_available():
@@ -272,10 +294,17 @@ def main():
         for frame_idx, obj_ids, mask_logits in predictor.propagate_in_video(state):
             mask = (mask_logits[0] > 0.0).squeeze().cpu().numpy().astype(np.uint8) * 255
             # 1-basiert speichern: frame_00001.png = MATLAB read(v, 1)
-            cv2.imwrite(os.path.join(out_dir, f"frame_{frame_idx + 1:05d}.png"), mask)
+            imwrite_unicode(os.path.join(out_dir, f"frame_{frame_idx + 1:05d}.png"), mask)
             n_saved += 1
             if n_saved % 100 == 0:
                 print(f"  {n_saved}/{num_frames} Masken gespeichert ...")
+
+        # Doppelte Kontrolle: tatsaechlich vorhandene Dateien zaehlen, damit ein
+        # zukuenftiges stilles Fehlschlagen nicht erneut unbemerkt bliebe.
+        n_on_disk = len([f for f in os.listdir(out_dir) if f.lower().endswith(".png")])
+        if n_on_disk != n_saved:
+            sys.exit(f"FEHLER: {n_saved} Masken sollten geschrieben sein, "
+                      f"aber nur {n_on_disk} PNG-Dateien liegen in\n  {out_dir}")
 
         print(f"\nFertig: {n_saved} Masken gespeichert in\n  {out_dir}")
         if n_saved != num_frames:
