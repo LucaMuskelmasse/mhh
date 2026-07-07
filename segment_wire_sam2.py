@@ -9,13 +9,15 @@ Workflow (Vorverarbeitung fuer kruemung_jinhan.m):
   1. Video per Datei-Dialog auswaehlen (Start im DEFAULT_PATH).
   2. Alle Frames werden in einen temporaeren JPEG-Ordner extrahiert
      (das erwartet der SAM-2-Video-Predictor).
-  3. Erster Frame wird angezeigt: Draht anklicken.
+  3. Der PROMPT_FRAME-te Frame wird angezeigt (Default: 10.; die ersten Frames
+     sind oft verzerrt und ungeeignet): Draht anklicken.
        - Linksklick  = Punkt gehoert ZUM Draht (positiv, gruenes +)
        - Rechtsklick = Punkt gehoert NICHT zum Draht (negativ, rotes x)
        - Taste 'u'   = letzten Punkt entfernen
        - Enter       = bestaetigen und Propagation starten
      Nach jedem Klick wird die aktuelle SAM-2-Maske als Overlay angezeigt.
-  4. SAM 2 propagiert die Maske automatisch durch ALLE Frames.
+  4. SAM 2 propagiert die Maske automatisch in BEIDE Richtungen (vorwaerts und
+     rueckwaerts ab dem Prompt-Frame) durch ALLE Frames.
   5. Masken werden gespeichert als:
          <videoname>_sam2_masks/frame_00001.png, frame_00002.png, ...
      (uint8, 0/255; 1-basiert -> frame_00001.png entspricht MATLAB read(v,1))
@@ -42,6 +44,11 @@ DEFAULT_PATH = r"M:\nascas2\Students\Wöhlken\2026-07-06"   # Startordner Dialog
 # Modellgroesse: "auto" | "tiny" | "small" | "base_plus" | "large"
 # auto -> GPU (CUDA): base_plus, sonst CPU: tiny (CPU mit large ist sehr langsam)
 MODEL_SIZE = "auto"
+
+# 1-basiert: welcher Frame wird zum Anklicken gezeigt/geprompted. Die ersten
+# Frames sind oft verzerrt und fuer den Prompt ungeeignet; SAM 2 propagiert
+# die Maske von hier aus automatisch in BEIDE Richtungen durch das Video.
+PROMPT_FRAME = 10
 
 # Ordner fuer die Modellgewichte (wird bei Bedarf angelegt; Download automatisch)
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkpoints")
@@ -154,8 +161,8 @@ def download_checkpoint(model_size):
     return ckpt_path
 
 
-def collect_prompts_interactive(predictor, state, first_frame_rgb):
-    """Erster Frame anzeigen, Klick-Prompts sammeln, Maske live anzeigen.
+def collect_prompts_interactive(predictor, state, prompt_idx, prompt_frame_rgb):
+    """Prompt-Frame anzeigen, Klick-Prompts sammeln, Maske live anzeigen.
 
     Rueckgabe: (points Nx2 float32, labels N int32) - mindestens 1 positiver Punkt.
     """
@@ -163,13 +170,13 @@ def collect_prompts_interactive(predictor, state, first_frame_rgb):
     labels = []   # 1 = positiv (Draht), 0 = negativ (Hintergrund)
 
     fig, ax = plt.subplots(figsize=(12, 8))
-    fig.canvas.manager.set_window_title("SAM 2 - Draht anklicken")
-    ax.imshow(first_frame_rgb)
-    ax.set_title("Linksklick = Draht | Rechtsklick = Hintergrund | "
+    fig.canvas.manager.set_window_title(f"SAM 2 - Draht anklicken (Frame {prompt_idx + 1})")
+    ax.imshow(prompt_frame_rgb)
+    ax.set_title(f"Frame {prompt_idx + 1} | Linksklick = Draht | Rechtsklick = Hintergrund | "
                  "'u' = rueckgaengig | Enter = fertig")
     ax.set_axis_off()
 
-    h, w = first_frame_rgb.shape[:2]
+    h, w = prompt_frame_rgb.shape[:2]
     overlay = ax.imshow(np.zeros((h, w, 4), dtype=np.float32))  # Masken-Overlay
     pos_plot, = ax.plot([], [], 'g+', markersize=14, markeredgewidth=2)
     neg_plot, = ax.plot([], [], 'rx', markersize=12, markeredgewidth=2)
@@ -183,7 +190,7 @@ def collect_prompts_interactive(predictor, state, first_frame_rgb):
         predictor.reset_state(state)
         _, _, mask_logits = predictor.add_new_points_or_box(
             inference_state=state,
-            frame_idx=0,
+            frame_idx=prompt_idx,
             obj_id=1,
             points=np.array(points, dtype=np.float32),
             labels=np.array(labels, dtype=np.int32),
@@ -267,37 +274,56 @@ def main():
     try:
         print("Extrahiere Frames ...")
         num_frames = extract_frames(video_path, frames_dir)
+        if num_frames < PROMPT_FRAME:
+            sys.exit(f"Video hat nur {num_frames} Frames, PROMPT_FRAME={PROMPT_FRAME} "
+                     f"ist nicht erreichbar. PROMPT_FRAME oben im Skript anpassen.")
+        prompt_idx = PROMPT_FRAME - 1   # 0-basiert fuer SAM-2-API/Dateinamen
 
         print("Lade SAM-2-Modell ...")
         predictor = build_sam2_video_predictor(MODEL_CFGS[model_size], ckpt_path, device=device)
         state = predictor.init_state(video_path=frames_dir)
 
-        # Erster Frame fuer die Klick-Ansicht (BGR -> RGB)
-        first_bgr = cv2.imread(os.path.join(frames_dir, "00000.jpg"))
-        first_rgb = cv2.cvtColor(first_bgr, cv2.COLOR_BGR2RGB)
+        # Prompt-Frame fuer die Klick-Ansicht (BGR -> RGB)
+        prompt_bgr = cv2.imread(os.path.join(frames_dir, f"{prompt_idx:05d}.jpg"))
+        prompt_rgb = cv2.cvtColor(prompt_bgr, cv2.COLOR_BGR2RGB)
 
-        print("Bitte Draht im Fenster anklicken (Enter = fertig) ...")
-        points, point_labels = collect_prompts_interactive(predictor, state, first_rgb)
+        print(f"Bitte Draht im Fenster anklicken (Frame {PROMPT_FRAME}, Enter = fertig) ...")
+        points, point_labels = collect_prompts_interactive(predictor, state, prompt_idx, prompt_rgb)
 
         # Prompts final setzen (Zustand nach interaktiver Phase ist bereits korrekt,
         # zur Sicherheit einmal sauber neu setzen)
         predictor.reset_state(state)
         predictor.add_new_points_or_box(
-            inference_state=state, frame_idx=0, obj_id=1,
+            inference_state=state, frame_idx=prompt_idx, obj_id=1,
             points=points, labels=point_labels,
         )
 
-        # --- Propagation durch das ganze Video + Masken speichern ---
+        # --- Propagation in BEIDE Richtungen ab dem Prompt-Frame + Masken speichern ---
         os.makedirs(out_dir, exist_ok=True)
         print(f"Propagiere Maske durch {num_frames} Frames ...")
+        seen = set()
         n_saved = 0
-        for frame_idx, obj_ids, mask_logits in predictor.propagate_in_video(state):
+
+        def save_mask(frame_idx, mask_logits):
+            nonlocal n_saved
+            if frame_idx in seen:
+                return
+            seen.add(frame_idx)
             mask = (mask_logits[0] > 0.0).squeeze().cpu().numpy().astype(np.uint8) * 255
             # 1-basiert speichern: frame_00001.png = MATLAB read(v, 1)
             imwrite_unicode(os.path.join(out_dir, f"frame_{frame_idx + 1:05d}.png"), mask)
             n_saved += 1
             if n_saved % 100 == 0:
                 print(f"  {n_saved}/{num_frames} Masken gespeichert ...")
+
+        print(f"  vorwaerts ab Frame {PROMPT_FRAME} ...")
+        for frame_idx, obj_ids, mask_logits in predictor.propagate_in_video(state):
+            save_mask(frame_idx, mask_logits)
+
+        if prompt_idx > 0:
+            print(f"  rueckwaerts bis Frame 1 ...")
+            for frame_idx, obj_ids, mask_logits in predictor.propagate_in_video(state, reverse=True):
+                save_mask(frame_idx, mask_logits)
 
         # Doppelte Kontrolle: tatsaechlich vorhandene Dateien zaehlen, damit ein
         # zukuenftiges stilles Fehlschlagen nicht erneut unbemerkt bliebe.
