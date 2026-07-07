@@ -20,7 +20,8 @@ In **PowerShell** (Standard-Terminal unter Windows, Prompt `PS C:\...>`):
 
 ```powershell
 # 1. Virtuelle Umgebung anlegen (einmalig), z.B. im Benutzerordner
-python -m venv $env:USERPROFILE\sam2env
+# WICHTIG: "py" statt "python" verwenden (siehe Hinweis unten)!
+py -m venv $env:USERPROFILE\sam2env
 & "$env:USERPROFILE\sam2env\Scripts\Activate.ps1"
 
 # 2. PyTorch installieren
@@ -43,8 +44,27 @@ pip install opencv-python matplotlib numpy pillow
 > Danach die `Activate.ps1`-Zeile erneut ausführen.
 
 > **cmd.exe / Eingabeaufforderung statt PowerShell?** Dann stattdessen:
-> `python -m venv %USERPROFILE%\sam2env` und zum Aktivieren
+> `py -m venv %USERPROFILE%\sam2env` und zum Aktivieren
 > `%USERPROFILE%\sam2env\Scripts\activate.bat`.
+
+> **Warum `py` statt `python`?** Auf manchen Rechnern zeigt der Befehl `python`
+> nicht auf eine echte Python-Installation, sondern auf ein von einem anderen
+> Programm mitgeliefertes Python (z.B. Inkscape oder GIMP nutzen intern ein
+> eigenes, eingeschränktes Python und hängen ihren `bin`-Ordner in den PATH).
+> Damit erzeugtes venv ist kaputt (u.a. fehlt `Scripts\Activate.ps1`). Der
+> **Python Launcher** `py` (wird vom offiziellen python.org-Installer mit
+> installiert) findet dagegen zuverlässig die echte Python-Installation,
+> unabhängig vom PATH. Prüfen kannst du das mit:
+> ```powershell
+> (Get-Command python).Source   # zeigt evtl. ein "fremdes" Python
+> py --version                  # sollte die echte Python-Version zeigen
+> ```
+> Falls du bereits mit `python -m venv ...` einen kaputten `sam2env`-Ordner
+> angelegt hast, diesen zuerst löschen und mit `py -m venv ...` neu anlegen:
+> ```powershell
+> Remove-Item -Recurse -Force $env:USERPROFILE\sam2env
+> py -m venv $env:USERPROFILE\sam2env
+> ```
 
 > **GPU oder nicht?** Das Skript erkennt das automatisch: mit CUDA-GPU nutzt es
 > das Modell `base_plus`, ohne GPU das kleine `tiny`-Modell (funktioniert, ist
