@@ -1,10 +1,21 @@
 % Function:
-% 1. Select a folder (with default path)
-% 2. Read all JPG images using imageDatastore
-% 3. Convert to grayscale on-the-fly
-% 4. Store into a structure array (without storing RGB images)
-% 5. Display the first image
-% 6. Display elapsed time
+% Krümmung eines DRAHTS aus einer JPG-Bildsequenz bestimmen (SAM-2-Masken).
+% 1. Ordner mit JPG-Bildern auswählen (mit Default-Pfad)
+% 2. Pro Bild die vorberechnete SAM-2-Maske laden, skelettieren und die
+%    Krümmung entlang der Mittellinie berechnen
+% 3. Mittlere Krümmung über die Temperatur (aus Dateinamen) plotten
+% 4. Farbliche Krümmungsdarstellung über dem Originalbild (mit Slider)
+%
+% WICHTIG - zweistufiger Workflow (Segmentierung mit Segment Anything Model 2,
+% ersetzt die frühere Binarisierung + ROI/Polygon-Maske):
+%   Schritt 1 (einmal pro Bilderordner, Python):
+%       python segment_wire_sam2.py
+%     -> Button "Bilderordner (.jpg)" waehlen, den Ordner auswaehlen; die
+%        Masken werden als <ordnername>_sam2_masks\frame_00001.png, ...
+%        NEBEN dem Bilderordner gespeichert (frame_00001.png = 1. Bild in
+%        alphabetischer Reihenfolge = Reihenfolge des imageDatastore).
+%        Einrichtung/Details: siehe README_SAM2.md
+%   Schritt 2: dieses Skript ausführen (lädt die PNGs statt zu binarisieren).
 clear; clc; close all;
 
 %% 1. Select folder with default path
@@ -14,9 +25,28 @@ if ImgPath == 0
     error('No folder selected');
 end
 
+%% 1b. SAM-2-Masken prüfen (müssen vorab mit segment_wire_sam2.py erzeugt sein)
+[parentDir, imgFolderName] = fileparts(ImgPath);
+maskDir = fullfile(parentDir, [imgFolderName '_sam2_masks']);
+if ~isfolder(maskDir)
+    error(['Keine SAM-2-Masken gefunden: %s\n' ...
+           'Bitte zuerst das Python-Skript ausführen:\n' ...
+           '    python segment_wire_sam2.py\n' ...
+           'dort "Bilderordner (.jpg)" wählen und diesen Ordner auswählen ' ...
+           '(siehe README_SAM2.md).'], maskDir);
+end
+
 %% 2. Create imageDatastore
 imds = imageDatastore(fullfile(ImgPath, '*.jpg'));
 ImageNummax = numel(imds.Files);
+
+% Maskenanzahl muss exakt zur Bildanzahl passen (sonst falsche Zuordnung)
+maskListing = dir(fullfile(maskDir, 'frame_*.png'));
+if numel(maskListing) ~= ImageNummax
+    error(['Maskenanzahl (%d) passt nicht zur Bildanzahl (%d) in %s.\n' ...
+           'Bitte segment_wire_sam2.py für diesen Ordner erneut ausführen.'], ...
+        numel(maskListing), ImageNummax, maskDir);
+end
 
 % Initialize structure array
 ImageData = struct('name', [], 'path', [], 'gray', [], 'bw', []);
@@ -43,35 +73,17 @@ for n = 1:ImageNummax
     end
     grayImgFiltered = medfilt2(grayImg, [3 3]);
 
-    % --- Binarisierung ---
-    level = 0.6;
-    bwImg = imbinarize(grayImgFiltered, level);
-
-    % ROI: außerhalb des interessanten Bereichs auf weiß setzen
-    bwImg_size = size(bwImg);
-    whiteImg = ones(bwImg_size);
-    whiteImg(1:end-70, 400:end-170) = bwImg(1:end-70, 400:end-170);
-    bwImg = whiteImg;
-
-
-    [H, W] = size(bwImg);
-
-    xv = [0.3563 0.4332 0.9173 1.1393 1.1933 1.1768 0.9188 0.6053 0.5183]*1000;
-    yv = [0.0005 0.9313 0.9253 0.7618 0.4918 0.2037 0.0822 0.0792 0.0005]*1000;
-
-
-    mask = poly2mask(xv, yv, H, W);
-    mask = ~mask;
-    bwImg(mask) = 1;
+    % --- SAM-2-Segmentierung laden (vorberechnet mit segment_wire_sam2.py) ---
+    % PNG-Maske des Bildes: weiß (255) = Draht, schwarz (0) = Hintergrund.
+    % Zuordnung über die Position n: imds.Files ist alphabetisch sortiert -
+    % identisch zur Sortierung im Python-Skript -> frame_%05d.png passt.
+    maskFile = fullfile(maskDir, sprintf('frame_%05d.png', n));
+    wireFG   = imread(maskFile) > 0;   % Vordergrund-Konvention: Draht = 1
 
     figure(1)
-    imshow(bwImg);
-
+    imshow(wireFG);
 
     % --- Skelettierung mit Lückenschließung ---
-    % Vordergrund-Konvention: Draht = 1
-    wireFG = ~bwImg;
-
     wireFG = bwareaopen(wireFG, 300);     % kleine Specks entfernen
 
     % Lücken schließen (Radius an größte Lücke anpassen, größer = mehr Brücken)
@@ -150,7 +162,7 @@ for n = 1:ImageNummax
     [~, name, ext] = fileparts(imds.Files{n});
     ImageData(n).name = [name, ext];
     ImageData(n).gray = grayImgFiltered;
-    ImageData(n).bw   = bwImg;
+    ImageData(n).bw   = wireFG;   % SAM-2-Maske (nach bwareaopen)
     ImageData(n).skel = skel;     % <-- neu
     ImageData(n).xs = xs;
     ImageData(n).ys = ys;

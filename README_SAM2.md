@@ -1,13 +1,15 @@
-# SAM-2-Segmentierung für kruemung_jinhan.m
+# SAM-2-Segmentierung für kruemung_jinhan.m und kruemung.m
 
-Die HSV-Farbmaske funktioniert bei den Videos in `2026-07-06` nicht. Stattdessen
-segmentiert das **Segment Anything Model 2 (SAM 2, Meta)** den Draht. Der Ablauf
-ist zweistufig:
+Die HSV-Farbmaske bzw. die Graustufen-Binarisierung reichen für die neuen
+Aufnahmen nicht. Stattdessen segmentiert das **Segment Anything Model 2
+(SAM 2, Meta)** den Draht. Der Ablauf ist zweistufig:
 
-1. **Python**: `segment_wire_sam2.py` segmentiert das Video einmal komplett und
-   speichert die Masken als PNGs neben dem Video.
-2. **MATLAB**: `kruemung_jinhan.m` lädt diese Masken (statt `createMask`) und
-   macht wie gewohnt Skelettierung + Krümmungsberechnung.
+1. **Python**: `segment_wire_sam2.py` segmentiert ein **Video (.avi)** oder
+   einen **Bilderordner (.jpg)** einmal komplett (Auswahlfenster am Start) und
+   speichert die Masken als PNGs im Nebenordner `<name>_sam2_masks` (neben dem
+   Video bzw. neben dem Bilderordner).
+2. **MATLAB**: `kruemung_jinhan.m` (Video) bzw. `kruemung.m` (Bilderordner)
+   lädt diese Masken und macht wie gewohnt Skelettierung + Krümmungsberechnung.
 
 ---
 
@@ -91,26 +93,29 @@ pip install opencv-python matplotlib numpy pillow
 
 ---
 
-## Nutzung (pro Video einmal)
+## Nutzung (pro Video/Bilderordner einmal)
 
 ```powershell
 & "$env:USERPROFILE\sam2env\Scripts\Activate.ps1"
 python segment_wire_sam2.py
 ```
 
-1. Im Datei-Dialog das `.avi` auswählen (startet in
+1. Im Auswahlfenster **"Video (.avi)"** oder **"Bilderordner (.jpg)"** klicken,
+   dann im Dialog das Video bzw. den Bilderordner auswählen (startet in
    `M:\nascas2\Students\Wöhlken\2026-07-06`).
-2. Es öffnet sich der erste Frame:
+2. Es öffnet sich der Prompt-Frame (Standard: das 10. Bild, einstellbar über
+   `PROMPT_FRAME` oben im Skript):
    - **Linksklick** = Punkt liegt AUF dem Draht (grünes `+`)
    - **Rechtsklick** = Punkt gehört NICHT zum Draht (rotes `x`, z.B. um
      fälschlich mitsegmentierte Bereiche auszuschließen)
    - **Taste `u`** = letzten Klick rückgängig machen
    - Nach jedem Klick wird die aktuelle Maske blau überlagert angezeigt.
-   - **Enter** = bestätigen, Propagation durch das ganze Video startet.
+   - **Enter** = bestätigen, Propagation (vorwärts + rückwärts) startet.
 3. Warten, bis "Fertig" erscheint. Ergebnis: Ordner
-   `<videoname>_sam2_masks\frame_00001.png, frame_00002.png, ...`
-   neben dem Video (weiß = Draht, schwarz = Hintergrund).
-4. In MATLAB `kruemung_jinhan.m` ausführen und dasselbe Video wählen.
+   `<videoname bzw. ordnername>_sam2_masks\frame_00001.png, ...`
+   neben dem Video/Bilderordner (weiß = Draht, schwarz = Hintergrund).
+4. In MATLAB `kruemung_jinhan.m` (Video) bzw. `kruemung.m` (Bilderordner)
+   ausführen und dasselbe Video / denselben Ordner wählen.
 
 **Tipp:** Ein paar PNGs aus der Mitte/dem Ende des Ordners kurz ansehen, um zu
 prüfen, dass SAM 2 den Draht über das ganze Video sauber verfolgt hat. Falls
@@ -121,9 +126,9 @@ nicht: Skript erneut ausführen und zusätzliche positive/negative Klicks setzen
 ## Fehlermeldungen
 
 - **MATLAB: "Keine SAM-2-Masken gefunden"** → Schritt "Nutzung" oben für dieses
-  Video ausführen.
-- **MATLAB: "Maskenanzahl passt nicht zur Frameanzahl"** → Python-Skript für das
-  Video erneut ausführen (alter/unvollständiger Maskenordner wird überschrieben).
+  Video / diesen Bilderordner ausführen.
+- **MATLAB: "Maskenanzahl passt nicht zur Frame-/Bildanzahl"** → Python-Skript
+  erneut ausführen (alter/unvollständiger Maskenordner wird überschrieben).
 - **Python: "Fehlendes Paket"** → Einrichtung oben durchführen bzw. venv
   aktivieren (`Activate.ps1`).
 - **PowerShell: "... die Ausführung von Skripts ist auf diesem System

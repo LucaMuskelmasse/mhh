@@ -2,13 +2,17 @@
 """
 segment_wire_sam2.py
 ====================
-Segmentiert einen Draht in einem .avi-Video mit dem Segment Anything Model 2
-(SAM 2, Meta) und speichert die Masken als PNG-Ordner neben dem Video.
+Segmentiert einen Draht in einem .avi-Video ODER einer JPG-Bildsequenz mit dem
+Segment Anything Model 2 (SAM 2, Meta) und speichert die Masken als PNG-Ordner
+neben dem Video bzw. neben dem Bilderordner.
 
-Workflow (Vorverarbeitung fuer kruemung_jinhan.m):
-  1. Video per Datei-Dialog auswaehlen (Start im DEFAULT_PATH).
-  2. Alle Frames werden in einen temporaeren JPEG-Ordner extrahiert
-     (das erwartet der SAM-2-Video-Predictor).
+Workflow (Vorverarbeitung fuer kruemung_jinhan.m [Video] / kruemung.m [Ordner]):
+  1. Auswahlfenster: "Video (.avi)" oder "Bilderordner (.jpg)", dann Datei-
+     bzw. Ordner-Dialog (Start im DEFAULT_PATH).
+  2. Alle Frames werden in einen temporaeren JPEG-Ordner extrahiert bzw.
+     kopiert (das erwartet der SAM-2-Video-Predictor). Bei Bilderordnern
+     werden die JPGs ALPHABETISCH sortiert - dieselbe Reihenfolge wie MATLABs
+     imageDatastore in kruemung.m (frame_00001.png = 1. Bild der Sortierung).
   3. Der PROMPT_FRAME-te Frame wird angezeigt (Default: 10.; die ersten Frames
      sind oft verzerrt und ungeeignet): Draht anklicken.
        - Linksklick  = Punkt gehoert ZUM Draht (positiv, gruenes +)
@@ -19,9 +23,11 @@ Workflow (Vorverarbeitung fuer kruemung_jinhan.m):
   4. SAM 2 propagiert die Maske automatisch in BEIDE Richtungen (vorwaerts und
      rueckwaerts ab dem Prompt-Frame) durch ALLE Frames.
   5. Masken werden gespeichert als:
-         <videoname>_sam2_masks/frame_00001.png, frame_00002.png, ...
-     (uint8, 0/255; 1-basiert -> frame_00001.png entspricht MATLAB read(v,1))
-  6. Danach kruemung_jinhan.m in MATLAB ausfuehren (laedt diese PNGs).
+         <videoname bzw. ordnername>_sam2_masks/frame_00001.png, ...
+     (uint8, 0/255; 1-basiert -> frame_00001.png entspricht MATLAB read(v,1)
+      bzw. dem ersten Bild des imageDatastore)
+  6. Danach kruemung_jinhan.m (Video) bzw. kruemung.m (Bilderordner) in
+     MATLAB ausfuehren (laedt diese PNGs).
 
 Einrichtung: siehe README_SAM2.md.
 """
@@ -92,6 +98,36 @@ def imwrite_unicode(path, img, params=None):
         raise RuntimeError(f"Datei wurde nicht geschrieben: {path}")
 
 
+def select_input_type():
+    """Kleines Auswahlfenster mit 2 Buttons (wie die MATLAB-Auswahlfenster):
+    'Video (.avi)' oder 'Bilderordner (.jpg)'. Rueckgabe: 'video' | 'folder'.
+    """
+    choice = {"value": None}
+
+    root = tk.Tk()
+    root.title("Eingabe waehlen")
+    root.geometry("380x110")
+    root.resizable(False, False)
+    tk.Label(root, text="Was soll segmentiert werden?",
+             font=("Segoe UI", 11, "bold")).pack(pady=8)
+    row = tk.Frame(root)
+    row.pack()
+
+    def pick(value):
+        choice["value"] = value
+        root.destroy()
+
+    tk.Button(row, text="Video (.avi)", width=17,
+              command=lambda: pick("video")).pack(side="left", padx=8)
+    tk.Button(row, text="Bilderordner (.jpg)", width=17,
+              command=lambda: pick("folder")).pack(side="left", padx=8)
+    root.mainloop()
+
+    if choice["value"] is None:
+        sys.exit("Keine Auswahl getroffen - Abbruch.")
+    return choice["value"]
+
+
 def select_video():
     """Datei-Dialog wie uigetfile in MATLAB."""
     root = tk.Tk()
@@ -105,6 +141,21 @@ def select_video():
     root.destroy()
     if not path:
         sys.exit("Kein Video ausgewaehlt - Abbruch.")
+    return path
+
+
+def select_folder():
+    """Ordner-Dialog wie uigetdir in MATLAB."""
+    root = tk.Tk()
+    root.withdraw()
+    initial = DEFAULT_PATH if os.path.isdir(DEFAULT_PATH) else os.path.expanduser("~")
+    path = filedialog.askdirectory(
+        title="Bilderordner (.jpg) auswaehlen (SAM-2-Segmentierung)",
+        initialdir=initial,
+    )
+    root.destroy()
+    if not path:
+        sys.exit("Kein Ordner ausgewaehlt - Abbruch.")
     return path
 
 
@@ -131,6 +182,26 @@ def extract_frames(video_path, frames_dir):
         sys.exit("Keine Frames im Video gefunden - Abbruch.")
     print(f"  Frames insgesamt: {idx}")
     return idx
+
+
+def copy_jpg_frames(src_dir, frames_dir):
+    """JPGs eines Bilderordners ALPHABETISCH sortiert als 00000.jpg, ... in den
+    Temp-Ordner kopieren (SAM 2 braucht rein numerische Dateinamen).
+
+    Die alphabetische Sortierung entspricht der Reihenfolge von MATLABs
+    imageDatastore in kruemung.m -> frame_00001.png passt zum 1. Bild dort.
+    """
+    jpgs = sorted(f for f in os.listdir(src_dir)
+                  if f.lower().endswith((".jpg", ".jpeg")))
+    if not jpgs:
+        sys.exit(f"Keine .jpg-Dateien gefunden in: {src_dir}")
+    for idx, name in enumerate(jpgs):
+        shutil.copy(os.path.join(src_dir, name),
+                    os.path.join(frames_dir, f"{idx:05d}.jpg"))
+        if (idx + 1) % 200 == 0:
+            print(f"  Bilder kopiert: {idx + 1} ...")
+    print(f"  Bilder insgesamt: {len(jpgs)}")
+    return len(jpgs)
 
 
 def download_checkpoint(model_size):
@@ -248,10 +319,18 @@ def main():
     except ImportError as exc:
         sys.exit(f"Fehlendes Paket: {exc}\nBitte Einrichtung laut README_SAM2.md durchfuehren.")
 
-    video_path = os.path.normpath(select_video())
-    vid_dir = os.path.dirname(video_path)
-    vid_name = os.path.splitext(os.path.basename(video_path))[0]
-    out_dir = os.path.normpath(os.path.join(vid_dir, f"{vid_name}_sam2_masks"))
+    # --- Eingabe waehlen: Video (.avi) oder Bilderordner (.jpg) ---
+    input_type = select_input_type()
+    if input_type == "video":
+        video_path = os.path.normpath(select_video())
+        base_dir = os.path.dirname(video_path)
+        src_name = os.path.splitext(os.path.basename(video_path))[0]
+    else:
+        img_dir = os.path.normpath(select_folder())
+        base_dir = os.path.dirname(img_dir)
+        src_name = os.path.basename(img_dir)
+    # Masken landen im Nebenordner <name>_sam2_masks (neben Video bzw. Ordner)
+    out_dir = os.path.normpath(os.path.join(base_dir, f"{src_name}_sam2_masks"))
 
     # --- Device + Modellgroesse ---
     if torch.cuda.is_available():
@@ -272,8 +351,12 @@ def main():
 
     frames_dir = tempfile.mkdtemp(prefix="sam2_frames_")
     try:
-        print("Extrahiere Frames ...")
-        num_frames = extract_frames(video_path, frames_dir)
+        if input_type == "video":
+            print("Extrahiere Frames ...")
+            num_frames = extract_frames(video_path, frames_dir)
+        else:
+            print("Kopiere Bilder ...")
+            num_frames = copy_jpg_frames(img_dir, frames_dir)
         if num_frames < PROMPT_FRAME:
             sys.exit(f"Video hat nur {num_frames} Frames, PROMPT_FRAME={PROMPT_FRAME} "
                      f"ist nicht erreichbar. PROMPT_FRAME oben im Skript anpassen.")
@@ -335,7 +418,10 @@ def main():
         print(f"\nFertig: {n_saved} Masken gespeichert in\n  {out_dir}")
         if n_saved != num_frames:
             print(f"WARNUNG: {num_frames} Frames, aber {n_saved} Masken!")
-        print("Jetzt kruemung_jinhan.m in MATLAB ausfuehren und dieses Video waehlen.")
+        if input_type == "video":
+            print("Jetzt kruemung_jinhan.m in MATLAB ausfuehren und dieses Video waehlen.")
+        else:
+            print("Jetzt kruemung.m in MATLAB ausfuehren und diesen Bilderordner waehlen.")
     finally:
         shutil.rmtree(frames_dir, ignore_errors=True)
 
