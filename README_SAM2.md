@@ -16,23 +16,35 @@ ist zweistufig:
 Voraussetzung: **Python ≥ 3.10** (auf Windows: [python.org](https://www.python.org/downloads/),
 beim Installieren "Add to PATH" anhaken) und **Git**.
 
-In einer Eingabeaufforderung (cmd/PowerShell):
+In **PowerShell** (Standard-Terminal unter Windows, Prompt `PS C:\...>`):
 
-```bat
-:: 1. Virtuelle Umgebung anlegen (einmalig), z.B. im Benutzerordner
-python -m venv %USERPROFILE%\sam2env
-%USERPROFILE%\sam2env\Scripts\activate
+```powershell
+# 1. Virtuelle Umgebung anlegen (einmalig), z.B. im Benutzerordner
+python -m venv $env:USERPROFILE\sam2env
+& "$env:USERPROFILE\sam2env\Scripts\Activate.ps1"
 
-:: 2. PyTorch installieren
-::    MIT NVIDIA-GPU (empfohlen, deutlich schneller) - CUDA-Variante:
+# 2. PyTorch installieren
+#    MIT NVIDIA-GPU (empfohlen, deutlich schneller) - CUDA-Variante:
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-::    ODER OHNE GPU (nur CPU):
-::    pip install torch torchvision
+#    ODER OHNE GPU (nur CPU):
+#    pip install torch torchvision
 
-:: 3. SAM 2 + Hilfspakete installieren
+# 3. SAM 2 + Hilfspakete installieren
 pip install git+https://github.com/facebookresearch/sam2.git
 pip install opencv-python matplotlib numpy pillow
 ```
+
+> **Fehler beim Aktivieren?** Falls PowerShell meldet, dass die Ausführung von
+> Skripts auf diesem System deaktiviert ist, einmal pro PowerShell-Fenster
+> ausführen (gilt nur für die aktuelle Sitzung):
+> ```powershell
+> Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+> ```
+> Danach die `Activate.ps1`-Zeile erneut ausführen.
+
+> **cmd.exe / Eingabeaufforderung statt PowerShell?** Dann stattdessen:
+> `python -m venv %USERPROFILE%\sam2env` und zum Aktivieren
+> `%USERPROFILE%\sam2env\Scripts\activate.bat`.
 
 > **GPU oder nicht?** Das Skript erkennt das automatisch: mit CUDA-GPU nutzt es
 > das Modell `base_plus`, ohne GPU das kleine `tiny`-Modell (funktioniert, ist
@@ -49,8 +61,8 @@ pip install opencv-python matplotlib numpy pillow
 
 ## Nutzung (pro Video einmal)
 
-```bat
-%USERPROFILE%\sam2env\Scripts\activate
+```powershell
+& "$env:USERPROFILE\sam2env\Scripts\Activate.ps1"
 python segment_wire_sam2.py
 ```
 
@@ -81,4 +93,7 @@ nicht: Skript erneut ausführen und zusätzliche positive/negative Klicks setzen
 - **MATLAB: "Maskenanzahl passt nicht zur Frameanzahl"** → Python-Skript für das
   Video erneut ausführen (alter/unvollständiger Maskenordner wird überschrieben).
 - **Python: "Fehlendes Paket"** → Einrichtung oben durchführen bzw. venv
-  aktivieren (`activate`).
+  aktivieren (`Activate.ps1`).
+- **PowerShell: "... die Ausführung von Skripts ist auf diesem System
+  deaktiviert"** → `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
+  ausführen (siehe oben), dann `Activate.ps1` erneut aufrufen.
