@@ -30,8 +30,8 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 #    ODER OHNE GPU (nur CPU):
 #    pip install torch torchvision
 
-# 3. SAM 2 + Hilfspakete installieren
-pip install git+https://github.com/facebookresearch/sam2.git
+# 3. SAM 2 + Hilfspakete installieren (kein Git nötig, siehe Hinweis unten)
+pip install https://github.com/facebookresearch/sam2/archive/refs/heads/main.zip
 pip install opencv-python matplotlib numpy pillow
 ```
 
@@ -65,6 +65,18 @@ pip install opencv-python matplotlib numpy pillow
 > Remove-Item -Recurse -Force $env:USERPROFILE\sam2env
 > py -m venv $env:USERPROFILE\sam2env
 > ```
+
+> **Fehler "Cannot find command 'git'"?** `pip install git+https://...` braucht
+> ein installiertes `git`. Zwei Möglichkeiten:
+> - **Ohne Git (einfacher):** stattdessen das ZIP-Archiv installieren (siehe
+>   Schritt 3 oben) - funktioniert identisch, ganz ohne Git:
+>   ```powershell
+>   pip install https://github.com/facebookresearch/sam2/archive/refs/heads/main.zip
+>   ```
+> - **Mit Git:** [Git for Windows](https://git-scm.com/download/win)
+>   installieren (Standardoptionen reichen), PowerShell-Fenster **neu öffnen**
+>   (damit der PATH aktualisiert wird), danach `pip install git+https://...`
+>   erneut ausführen.
 
 > **GPU oder nicht?** Das Skript erkennt das automatisch: mit CUDA-GPU nutzt es
 > das Modell `base_plus`, ohne GPU das kleine `tiny`-Modell (funktioniert, ist
