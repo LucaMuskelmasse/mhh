@@ -1,9 +1,26 @@
 % Function (Schritt 5 - automatische Tip-Zuweisung über alle Frames, Ordnerlauf):
 % 1. Einen ORDNER mit MP4-Videos auswählen. Verarbeitet werden nur die
 %    *_Camera1.mp4 (V01, V02, ...); *_Camera2.mp4 werden ignoriert.
-% 2. EINE Trajektorie-Datei (.mat mit TipCoordinates + cochleaCenter, erzeugt
+% 2. Danach öffnet sich EIN Parameterfenster mit ALLEN Einstellungen:
+%    - Ähnlichkeitstransformation (Rotation um M, Skalierung um M, Translation
+%      X/Y), die auf Trajektorie + Mittelpunkt angewendet wird, bevor die
+%      Trapeze berechnet werden (Trapeze sind dadurch automatisch mit
+%      transformiert).
+%    - Maske / Background Subtraction (Anzahl Hintergrund-Frames, Schwellwert,
+%      minimale Blob-Größe).
+%    - Rückwärts-Abspielen (Haken) + Startframe: bei rückwärts wird der letzte
+%      echte Frame zuerst verarbeitet, der Hintergrund kommt aus den letzten
+%      echten Frames, die CSV-Daten werden an die Wiedergabe-Position gebunden
+%      (Zeitachse läuft vorwärts); Tracking/Plot beginnen ab dem Startframe.
+%    - Live-Vorschau (RGB Image oder BW Maske) und Video-Modus (Ein Video /
+%      Alle Videos).
+%    Nach "Bestätigen" werden alle Werte in <ordner>\tracking_params.mat
+%    gespeichert; beim erneuten Öffnen desselben Ordners ist das Fenster mit
+%    diesen Werten vorbelegt. Die Konstanten oben im Code sind nur die Fallback-
+%    Vorbelegung, wenn noch keine tracking_params.mat existiert.
+% 3. EINE Trajektorie-Datei (.mat mit TipCoordinates + cochleaCenter, erzeugt
 %    von create_trajectory.m) auswählen - sie gilt für ALLE Videos im Ordner.
-% 3. Jedes Video nacheinander mit demselben Algorithmus bearbeiten:
+% 4. Jedes Video nacheinander mit demselben Algorithmus bearbeiten:
 %    - Passende Messdaten-CSV laden (<...>_F1.csv, deutsches Format: ; und ,),
 %      mit TimeStamp (Spalte U), Kraft in z-Richtung (Spalte C) und Frame-Nummer
 %      (Spalte Y). Zu jedem Frame wird die ERSTE Zeile mit dieser Frame-Nummer
@@ -12,9 +29,9 @@
 %    - Pro Trajektorienpunkt ein an Tangente/Normale ausgerichtetes Viereck,
 %      dessen Breite/Höhe linear mit dem Abstand zum Mittelpunkt wachsen
 %      (jede Ecke einzeln skaliert -> Trapeze). Statisch -> einmal vorberechnet.
-%    - ALLE Frames chronologisch ab Frame 1 durchgehen. Pro Frame:
+%    - ALLE Frames chronologisch durchgehen. Pro Frame:
 %        * Background Subtraction
-%        * Trapeze als Suchflächen durchgehen: NICHT mehr immer ab dem
+%        * Trapeze als Suchflächen durchgehen: NICHT immer ab dem
 %          mittelpunktsnächsten Trajektorien-Ende, sondern ab dem Trapez,
 %          das searchAhead Trapeze näher an M liegt als die Zuweisung des
 %          VORHERIGEN Frames, von dort in derselben Richtung weiter bis zum
@@ -22,34 +39,9 @@
 %          Schwerpunkt der GRÖSSTEN schwarzen Fläche als Tip (grünes Kreuz).
 %        * Findet kein Trapez schwarze Pixel, wird der Tip auf das rote Kreuz des
 %          Trajektorien-Eingangs gesetzt (= zuletzt durchsuchter Punkt).
-%    - Tip-Trajektorie (grüne Kreuze), Winkel über TimeStamp und Winkel über
-%      Kraft z anzeigen.
-% 4. In jedem Figure-Titel steht zusätzlich, welches V0x bearbeitet wird. Die
+%    - Tip-Trajektorie (grüne Kreuze), Winkel/Insertionstiefe/Kraft anzeigen.
+% 5. In jedem Figure-Titel steht zusätzlich, welches V0x bearbeitet wird. Die
 %    Plots bleiben offen; die Videos laufen automatisch nacheinander durch.
-% 5. Vor der Ordnerauswahl öffnet sich ein Fenster mit 4 Buttons (Ordner 1/2/3/4):
-%    - Ordner 1: Verarbeitung wie oben beschrieben, unverändert.
-%    - Ordner 2, 3 und 4: zusätzlich wird eine Ähnlichkeitstransformation
-%      (Rotation, Skalierung, Translation; Parameter oben einstellbar, JEWEILS
-%      EIGENE für Ordner 2, 3 und 4) auf die geladene Trajektorie und den
-%      Mittelpunkt angewendet, bevor die Trapeze berechnet werden - die
-%      Trapeze sind dadurch automatisch mit transformiert.
-%    - Ordner 4: die Videos werden zusätzlich RÜCKWÄRTS abgespielt (letzter
-%      echter Frame zuerst). Der Hintergrund kommt daher aus den letzten
-%      echten Frames, die CSV-Daten (TimeStamp/Kraft) werden an die
-%      Wiedergabe-Position gebunden -> die Zeitachse läuft vorwärts.
-%      Tracking/Plot beginnen erst ab Wiedergabe-Position startFrame4
-%      (Zählung nach dem Umkehren); frühere Frames werden übersprungen.
-% 6. Danach ein weiteres Fenster mit 2 Buttons (Ein Video / Alle Videos):
-%    - Ein Video: EIN bestimmtes Video aus dem Ordner auswählen und nur
-%      dieses bearbeiten.
-%    - Alle Videos: wie bisher werden alle *_Camera1.mp4 im Ordner nacheinander
-%      bearbeitet.
-% 7. GANZ ZU BEGINN (vor allen anderen Fenstern) ein Fenster mit 2 Buttons
-%    (RGB Image / BW Maske) zum Testen der Background-Subtraction-Parameter:
-%    legt fest, ob die Live-Vorschau (Abschnitt 5) das RGB-Bild oder die
-%    binäre Vordergrundmaske zeigt. Ordner 2 und Ordner 4 verwenden dabei
-%    eigene Background-Subtraction-Parameter (numBgFrames2.../numBgFrames4...),
-%    Ordner 1 und 3 die ursprünglichen (numBgFrames/fgThreshold/minBlobSize).
 %
 % Es gibt KEINE Tip-Zuweisung per Suchradius und KEINE manuelle Korrektur mehr
 % (gegenüber cochlea_model_tracking.m bewusst entfernt). Background Subtraction
@@ -77,30 +69,32 @@ heightSlope = 0.4;   % Höhenzuwachs   je px Abstand zum Mittelpunkt [px/px]
 % entfernten (unplausiblen) Trapezen nahe M.
 searchAhead = 5;     % Trapeze "Vorsprung" Richtung M ab der letzten Zuweisung
 
-% --- Background-Subtraction-Parameter (wie in cochlea_model_tracking.m) ---
-% Gelten für Ordner 1 und Ordner 3 unverändert.
+% --- Fallback-Vorbelegung des Parameterfensters ---
+% Diese Werte erscheinen im Parameterfenster nur, wenn im gewählten Ordner
+% noch KEINE tracking_params.mat existiert. Sobald bestätigt wurde, werden die
+% Fensterwerte dort gespeichert und beim nächsten Mal wieder vorbelegt.
+
+% Background Subtraction (Maske)
 numBgFrames = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hintergrund
 fgThreshold = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
 minBlobSize = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
 
-% --- Background-Subtraction-Parameter NUR für Ordner 2 (gesondert einstellbar) ---
-numBgFrames2 = 5;     % Anzahl früher (elektrodenfreier) Frames für den Hintergrund
-fgThreshold2 = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
-minBlobSize2 = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
+% Ähnlichkeitstransformation der Trajektorie + Mittelpunkt M.
+% Rotation und Skalierung erfolgen um M (relativ zu M); anschließend wird
+% zusätzlich um simTranslation verschoben:
+%   [x'; y'] = simScale * R(simRotationDeg) * ([x;y] - M) + M + simTranslation'
+% Identität (0 / 1 / [0 0]) = keine Veränderung.
+simRotationDeg = 0;      % Rotation um M [°], gegen den Uhrzeigersinn positiv
+simScale       = 1;      % Skalierungsfaktor (um M)
+simTranslation = [0, 0]; % [tx, ty] zusätzliche Verschiebung [px]
 
-% --- Background-Subtraction-Parameter NUR für Ordner 4 (gesondert einstellbar) ---
-% Ordner-4-Videos werden RÜCKWÄRTS abgespielt -> die elektrodenfreien Frames
-% (Hintergrund) sind am VideoENDE (= Anfang der Rückwärts-Wiedergabe).
-numBgFrames4 = 5;     % Anzahl (in Wiedergaberichtung erster) elektrodenfreier Frames
-fgThreshold4 = 0.15;  % Schwellwert (0..1) für die Differenz: größer = strenger
-minBlobSize4 = 50;    % kleinste Vordergrund-Fläche (Pixel), kleinere werden entfernt
+% Wiedergabe
+reverseVideo = false;    % true = Video rückwärts abspielen (letzter Frame zuerst)
+startFrame   = 1;        % erste ausgewertete (Wiedergabe-)Position
 
-% --- Startframe der Wiedergabe NUR für Ordner 4 ---
-% Zählung NACH dem Umkehren: Wiedergabe-Position 1 = letzter echter Frame.
-% Tracking/Plot beginnen erst ab dieser Wiedergabe-Position (frühere Frames
-% werden übersprungen). Der Hintergrund wird davon NICHT beeinflusst (er kommt
-% weiter aus den ersten numBgFrames4 elektrodenfreien Wiedergabe-Frames).
-startFrame4 = 1600;   % erste ausgewertete Wiedergabe-Position bei Ordner 4
+% Modus
+previewMode = 1;         % Live-Vorschau: 1 = RGB Image, 2 = BW Maske
+videoMode   = 2;         % 1 = Ein Video auswählen, 2 = Alle Videos
 
 % --- Live-Vorschau während des Durchlaufs ---
 showPreview = true;  % true = aktuellen Frame + Tip beim Durchlauf anzeigen
@@ -115,80 +109,11 @@ smoothSpan = 15;     % Breite des gleitenden Mittelwerts (Frames); ungerade empf
 % am Trajektorienende ergibt sich die Insertionstiefe in mm.
 insertionDepthMax = 28;   % tatsächliche Tiefe am Trajektorienende [mm]
 
-% --- Standard-Startpfade für die 4 Ordner-Buttons (unten anpassen) ---
-defaultPath1 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\Versuche_7';
-defaultPath2 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\SlimStraigth_EA';
-defaultPath3 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\vers_Lichter';
-defaultPath4 = 'M:\nascas2\Students\Wöhlken\Tracking_Videos\eval';
-
-% --- Ähnlichkeitstransformation der Trajektorie (bei Ordner 2 bzw. Ordner 3) ---
-% Bildet Trajektorie + Mittelpunkt vom Koordinatensystem, in dem sie erstellt
-% wurden, in das Koordinatensystem der Ordner-2- bzw. Ordner-3-Videos ab.
-% Rotation und Skalierung erfolgen um den Mittelpunkt M (relativ zu M);
-% anschließend wird zusätzlich um simTranslation verschoben:
-%   [x'; y'] = simScale * R(simRotationDeg) * ([x;y] - M) + M + simTranslation'
-% Ordner 2 und Ordner 3 haben JEWEILS EIGENE, unabhängige Parameter.
-simRotationDeg2 = 0;             % Rotation um M [°] für Ordner 2, gegen den Uhrzeigersinn positiv
-simScale2       = 1;             % Skalierungsfaktor (um M) für Ordner 2
-simTranslation2 = [0, 0];        % [tx, ty] zusätzliche Verschiebung [px] für Ordner 2
-
-simRotationDeg3 = 0;             % Rotation um M [°] für Ordner 3, gegen den Uhrzeigersinn positiv
-simScale3       = 2;             % Skalierungsfaktor (um M) für Ordner 3
-simTranslation3 = [230, 200];    % [tx, ty] zusätzliche Verschiebung [px] für Ordner 3
-
-simRotationDeg4 = 0;             % Rotation um M [°] für Ordner 4, gegen den Uhrzeigersinn positiv
-simScale4       = 1;             % Skalierungsfaktor (um M) für Ordner 4
-simTranslation4 = [0, 0];        % [tx, ty] zusätzliche Verschiebung [px] für Ordner 4
-
-%% -1. Vorschau-Anzeige auswählen (RGB Image / BW Maske) - zum Testen der
-%      Background-Subtraction-Parameter (v.a. für Ordner 2)
-previewMode = selectPreviewMode();
-if isempty(previewMode)
-    error('Kein Vorschau-Modus ausgewählt');
-end
-
-%% 0. Ordner-Szenario auswählen (Ordner 1 / 2 / 3 / 4)
-folderChoice = selectFolderScenario();
-if isempty(folderChoice)
-    error('Kein Ordner-Szenario ausgewählt');
-end
-reverseVideo = false;   % Standard: Frames in normaler Reihenfolge verarbeiten
-startPos     = 1;       % Standard: ab erster (Wiedergabe-)Position auswerten
-switch folderChoice
-    case 1
-        defaultPath = defaultPath1;
-    case 2
-        defaultPath = defaultPath2;
-        % Ordner 2: eigene Background-Subtraction-Parameter + eigene
-        % Ähnlichkeitstransformation verwenden
-        numBgFrames = numBgFrames2;
-        fgThreshold = fgThreshold2;
-        minBlobSize = minBlobSize2;
-        simRotationDegActive = simRotationDeg2;
-        simScaleActive       = simScale2;
-        simTranslationActive = simTranslation2;
-    case 3
-        defaultPath = defaultPath3;
-        % Ordner 3: eigene Ähnlichkeitstransformation verwenden
-        simRotationDegActive = simRotationDeg3;
-        simScaleActive       = simScale3;
-        simTranslationActive = simTranslation3;
-    case 4
-        defaultPath = defaultPath4;
-        % Ordner 4: eigene Background-Subtraction-Parameter + eigene
-        % Ähnlichkeitstransformation; Videos werden RÜCKWÄRTS abgespielt.
-        numBgFrames = numBgFrames4;
-        fgThreshold = fgThreshold4;
-        minBlobSize = minBlobSize4;
-        simRotationDegActive = simRotationDeg4;
-        simScaleActive       = simScale4;
-        simTranslationActive = simTranslation4;
-        reverseVideo = true;
-        startPos     = startFrame4;
-end
+% --- Standard-Startpfad für den Ordner-Dialog (bei Bedarf anpassen) ---
+defaultPath = 'M:\nascas2\Students\Wöhlken\Tracking_Videos';
 
 %% 1. ORDNER mit MP4-Videos auswählen
-vidDir = uigetdir(defaultPath, sprintf('Ordner mit MP4-Videos auswählen (Ordner %d)', folderChoice));
+vidDir = uigetdir(defaultPath, 'Ordner mit MP4-Videos auswählen');
 if isequal(vidDir, 0)
     error('Kein Ordner ausgewählt');
 end
@@ -202,12 +127,54 @@ end
 [~, ord] = sort({listing.name});
 listing = listing(ord);
 
-%% 1b. Ein Video oder alle Videos verarbeiten?
-videoModeChoice = selectVideoMode();
-if isempty(videoModeChoice)
-    error('Kein Video-Modus ausgewählt');
+%% 1b. Parameterfenster: gespeicherte Werte laden bzw. Defaults, dann abfragen
+% Vorbelegung: gespeicherte tracking_params.mat im Ordner, sonst obige Defaults.
+defaults = struct( ...
+    'simRotationDeg', simRotationDeg, 'simScale', simScale, ...
+    'simTranslation', simTranslation, ...
+    'numBgFrames', numBgFrames, 'fgThreshold', fgThreshold, ...
+    'minBlobSize', minBlobSize, ...
+    'reverseVideo', reverseVideo, 'startFrame', startFrame, ...
+    'previewMode', previewMode, 'videoMode', videoMode);
+
+paramFile = fullfile(vidDir, 'tracking_params.mat');
+if isfile(paramFile)
+    Lp = load(paramFile, 'params');
+    if isfield(Lp, 'params') && isstruct(Lp.params)
+        % Gespeicherte Werte feldweise über die Defaults legen (robust gegen
+        % fehlende Felder aus älteren Versionen).
+        fn = fieldnames(defaults);
+        for k = 1:numel(fn)
+            if isfield(Lp.params, fn{k})
+                defaults.(fn{k}) = Lp.params.(fn{k});
+            end
+        end
+    end
 end
-if videoModeChoice == 1
+
+params = selectTrackingParams(defaults);
+if isempty(params)
+    error('Keine Parameter bestätigt');
+end
+
+% Bestätigte Werte in die Ablauf-Variablen übernehmen
+simRotationDegActive = params.simRotationDeg;
+simScaleActive       = params.simScale;
+simTranslationActive = params.simTranslation;
+numBgFrames = params.numBgFrames;
+fgThreshold = params.fgThreshold;
+minBlobSize = params.minBlobSize;
+reverseVideo = logical(params.reverseVideo);
+startPos     = params.startFrame;
+previewMode  = params.previewMode;
+videoMode    = params.videoMode;
+
+% Parameter im Ordner speichern (Vorbelegung beim nächsten Öffnen)
+save(paramFile, 'params');
+fprintf('Parameter gespeichert: %s\n', paramFile);
+
+%% 1c. Ein Video oder alle Videos verarbeiten?
+if videoMode == 1
     % Ein einzelnes Video aus dem Ordner auswählen
     [oneVidFile, ~] = uigetfile(fullfile(vidDir, '*_Camera1.mp4'), 'Video auswählen');
     if isequal(oneVidFile, 0)
@@ -222,10 +189,9 @@ end
 numVideos = numel(listing);
 
 %% 2. EINE Trajektorie (.mat) auswählen - gilt für alle Videos
-% Die Trajektorie liegt für alle Videos (Ordner 1/2/3) in Ordner 1 -> als
-% Startverzeichnis für den Dialog wird daher immer defaultPath1 verwendet.
+% (erzeugt von create_trajectory.m; Startordner = gewählter Video-Ordner)
 [matFile, matDir] = uigetfile({'*.mat','MAT-Datei mit Trajektorie (*.mat)'; '*.*','Alle Dateien (*.*)'}, ...
-    'Trajektorie (.mat) auswählen (gilt für alle Videos, liegt in Ordner 1)', defaultPath1);
+    'Trajektorie (.mat) auswählen (gilt für alle Videos)', vidDir);
 if isequal(matFile, 0)
     error('Keine Trajektorie ausgewählt');
 end
@@ -239,7 +205,7 @@ end
 TipCoordinates = S.TipCoordinates;   % [row, col] = [y, x]  (für alle Videos)
 M = S.cochleaCenter;                 % [x, y] = [col, row]   (für alle Videos)
 
-%% 2c. Bei Ordner 2, 3 oder 4: Ähnlichkeitstransformation auf Trajektorie + Mittelpunkt
+%% 2c. Ähnlichkeitstransformation auf Trajektorie + Mittelpunkt anwenden
 % Rotation und Skalierung erfolgen um den Mittelpunkt M (relativ zu M) ->
 % M selbst bewegt sich dabei nicht, wird aber anschließend wie die Trajektorie
 % um simTranslationActive verschoben. Die Trapeze werden weiter unten aus
@@ -247,23 +213,22 @@ M = S.cochleaCenter;                 % [x, y] = [col, row]   (für alle Videos)
 % dadurch automatisch mit transformiert. Die Trapez-Grundmaße
 % (rectWidth/rectHeight) werden mit simScaleActive skaliert, damit sie im
 % neuen Maßstab weiterhin der tatsächlichen Elektrodengröße entsprechen.
-if folderChoice == 2 || folderChoice == 3 || folderChoice == 4
-    theta = deg2rad(simRotationDegActive);
-    Rmat  = [cos(theta) -sin(theta); sin(theta) cos(theta)];
+% Identität (Rotation 0, Skalierung 1, Translation [0 0]) = keine Änderung.
+theta = deg2rad(simRotationDegActive);
+Rmat  = [cos(theta) -sin(theta); sin(theta) cos(theta)];
 
-    xyTraj = [TipCoordinates(:,2), TipCoordinates(:,1)];        % [x, y]
-    xyTraj = (simScaleActive * Rmat * (xyTraj - M).').' + M + simTranslationActive;
-    TipCoordinates = [xyTraj(:,2), xyTraj(:,1)];                % zurück zu [row, col]
+xyTraj = [TipCoordinates(:,2), TipCoordinates(:,1)];        % [x, y]
+xyTraj = (simScaleActive * Rmat * (xyTraj - M).').' + M + simTranslationActive;
+TipCoordinates = [xyTraj(:,2), xyTraj(:,1)];                % zurück zu [row, col]
 
-    M = M + simTranslationActive;   % M ist Rotations-/Skalierungszentrum -> nur Verschiebung
+M = M + simTranslationActive;   % M ist Rotations-/Skalierungszentrum -> nur Verschiebung
 
-    rectWidth  = rectWidth  * simScaleActive;
-    rectHeight = rectHeight * simScaleActive;
+rectWidth  = rectWidth  * simScaleActive;
+rectHeight = rectHeight * simScaleActive;
 
-    fprintf(['Ähnlichkeitstransformation angewendet (Ordner %d): Rotation=%.2f°, ', ...
-        'Skalierung=%.3f, Translation=[%.1f, %.1f]\n'], folderChoice, ...
-        simRotationDegActive, simScaleActive, simTranslationActive(1), simTranslationActive(2));
-end
+fprintf(['Ähnlichkeitstransformation: Rotation=%.2f°, Skalierung=%.3f, ', ...
+    'Translation=[%.1f, %.1f]\n'], simRotationDegActive, simScaleActive, ...
+    simTranslationActive(1), simTranslationActive(2));
 
 %% Schleife über alle Videos im Ordner
 for vi = 1:numVideos
@@ -403,7 +368,7 @@ for vi = 1:numVideos
     tipIdxFrame     = zeros(totalFrames, 1);   % Trajektorien-Index des Tips je Frame
     prevFoundIdx    = idxLast;   % Anker für die lokale Suche (Start: Eingang)
 
-    % Erste auszuwertende Wiedergabe-Position (bei Ordner 4 = startFrame4).
+    % Erste auszuwertende Wiedergabe-Position (Startframe aus dem Parameterfenster).
     % Frühere Positionen werden übersprungen und bleiben ungültig (0) -> sie
     % erscheinen später nicht im Plot. Auf gültigen Bereich begrenzen.
     startPosThis = min(max(round(startPos), 1), totalFrames);
@@ -526,7 +491,7 @@ for vi = 1:numVideos
     ylabel('Row (y)');
 
     % grüne Kreuze (Tips pro Frame) + verbindende Linie. Übersprungene Frames
-    % (vor startFrame4) bleiben [0,0] und werden hier ausgeblendet.
+    % (vor dem Startframe) bleiben [0,0] und werden hier ausgeblendet.
     validTip = any(TipCoordinates2 ~= 0, 2);
     plot(TipCoordinates2(validTip,2), TipCoordinates2(validTip,1), 'gx', 'MarkerSize', 8, 'LineWidth', 1.5);
     plot(TipCoordinates2(validTip,2), TipCoordinates2(validTip,1), 'g-', 'LineWidth', 1.0);
@@ -701,131 +666,117 @@ for vi = 1:numVideos
 end
 
 
-%% Lokale Funktion: Ordner-Szenario per Button auswählen
-function choice = selectFolderScenario()
-%SELECTFOLDERSCENARIO  Modales Fenster mit 4 Buttons (Ordner 1/2/3/4).
-%   Rückgabe: 1, 2, 3 oder 4 je nach gedrücktem Button; [] falls das Fenster
-%   ohne Auswahl geschlossen wurde.
+%% Lokale Funktion: Parameterfenster (Transformation, Maske, Wiedergabe, Modus)
+function params = selectTrackingParams(defaults)
+%SELECTTRACKINGPARAMS  Modales Fenster mit ALLEN Parametern; Felder aus
+%   defaults vorbelegt. Rückgabe: Struct mit den bestätigten Werten, oder []
+%   falls das Fenster ohne "Bestätigen" geschlossen wurde.
+%   defaults/params-Felder: simRotationDeg, simScale, simTranslation ([tx ty]),
+%   numBgFrames, fgThreshold, minBlobSize, reverseVideo, startFrame,
+%   previewMode (1=RGB,2=BW), videoMode (1=Ein Video,2=Alle Videos).
 
-    choice = [];
+    params = [];
 
-    hFig = figure('Name', 'Ordner auswählen', 'NumberTitle', 'off', ...
+    hFig = figure('Name', 'Tracking-Parameter', 'NumberTitle', 'off', ...
         'MenuBar', 'none', 'ToolBar', 'none', 'Resize', 'off', ...
-        'Position', [500 500 440 140]);
+        'Position', [400 250 460 560]);
 
-    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Welcher Ordner?', ...
-        'Units', 'normalized', 'Position', [0.05 0.65 0.9 0.25], ...
-        'FontSize', 11, 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
+    y = 520;                      % obere Startzeile [px], laeuft nach unten
+    dyRow = 34;                   % Zeilenabstand
+    handles = struct();
 
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 1', ...
-        'Units', 'normalized', 'Position', [0.04 0.15 0.21 0.4], ...
-        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(1));
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 2', ...
-        'Units', 'normalized', 'Position', [0.28 0.15 0.21 0.4], ...
-        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(2));
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 3', ...
-        'Units', 'normalized', 'Position', [0.52 0.15 0.21 0.4], ...
-        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(3));
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ordner 4', ...
-        'Units', 'normalized', 'Position', [0.76 0.15 0.21 0.4], ...
-        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(4));
+    header('Ähnlichkeitstransformation');
+    handles.rot   = editRow('Rotation um M [°]',        defaults.simRotationDeg);
+    handles.scale = editRow('Skalierung (um M)',        defaults.simScale);
+    handles.tx    = editRow('Translation X [px]',       defaults.simTranslation(1));
+    handles.ty    = editRow('Translation Y [px]',       defaults.simTranslation(2));
 
-    set(hFig, 'CloseRequestFcn', @(s,e) closeFig());
+    header('Maske (Background Subtraction)');
+    handles.nbg = editRow('Hintergrund-Frames (Anzahl)', defaults.numBgFrames);
+    handles.thr = editRow('Schwellwert (0..1)',          defaults.fgThreshold);
+    handles.blob = editRow('Min. Blob-Größe [px]',       defaults.minBlobSize);
 
-    uiwait(hFig);   % blockiert, bis ein Button gedrückt / Fenster geschlossen wird
+    header('Wiedergabe');
+    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Video rückwärts abspielen', ...
+        'Units', 'pixels', 'Position', [25 y 260 22], 'HorizontalAlignment', 'left');
+    handles.rev = uicontrol('Parent', hFig, 'Style', 'checkbox', ...
+        'Units', 'pixels', 'Position', [300 y 24 24], ...
+        'Value', double(logical(defaults.reverseVideo)));
+    y = y - dyRow;
+    handles.start = editRow('Startframe (Wiedergabe)', defaults.startFrame);
+
+    header('Modus');
+    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Live-Vorschau', ...
+        'Units', 'pixels', 'Position', [25 y 260 22], 'HorizontalAlignment', 'left');
+    handles.prev = uicontrol('Parent', hFig, 'Style', 'popupmenu', ...
+        'String', {'RGB Image', 'BW Maske'}, 'Value', defaults.previewMode, ...
+        'Units', 'pixels', 'Position', [300 y 140 24], 'BackgroundColor', 'w');
+    y = y - dyRow;
+    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Video-Modus', ...
+        'Units', 'pixels', 'Position', [25 y 260 22], 'HorizontalAlignment', 'left');
+    handles.vid = uicontrol('Parent', hFig, 'Style', 'popupmenu', ...
+        'String', {'Ein Video', 'Alle Videos'}, 'Value', defaults.videoMode, ...
+        'Units', 'pixels', 'Position', [300 y 140 24], 'BackgroundColor', 'w');
+    y = y - dyRow;
+
+    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Bestätigen', ...
+        'Units', 'pixels', 'Position', [175 20 110 34], ...
+        'FontWeight', 'bold', 'Callback', @(s,e) onConfirm());
+
+    set(hFig, 'CloseRequestFcn', @(s,e) onClose());
+    uiwait(hFig);   % blockiert bis "Bestätigen" / Schließen
 
     % ---------- verschachtelte Funktionen ----------
-    function setChoice(c)
-        choice = c;
-        closeFig();
+    function header(txt)
+        uicontrol('Parent', hFig, 'Style', 'text', 'String', txt, ...
+            'Units', 'pixels', 'Position', [15 y 430 22], ...
+            'FontWeight', 'bold', 'FontSize', 10, 'HorizontalAlignment', 'left');
+        y = y - 28;
     end
 
-    function closeFig()
-        if isvalid(hFig)
-            uiresume(hFig);
-            delete(hFig);
+    function h = editRow(label, val)
+        uicontrol('Parent', hFig, 'Style', 'text', 'String', label, ...
+            'Units', 'pixels', 'Position', [25 y 260 22], ...
+            'HorizontalAlignment', 'left');
+        h = uicontrol('Parent', hFig, 'Style', 'edit', 'String', num2str(val), ...
+            'Units', 'pixels', 'Position', [300 y 140 24], ...
+            'HorizontalAlignment', 'right', 'BackgroundColor', 'w');
+        y = y - dyRow;
+    end
+
+    function onConfirm()
+        % Zahlenfelder einlesen und pruefen
+        vals = struct( ...
+            'simRotationDeg', str2double(get(handles.rot,   'String')), ...
+            'simScale',       str2double(get(handles.scale, 'String')), ...
+            'tx',             str2double(get(handles.tx,    'String')), ...
+            'ty',             str2double(get(handles.ty,    'String')), ...
+            'numBgFrames',    str2double(get(handles.nbg,   'String')), ...
+            'fgThreshold',    str2double(get(handles.thr,   'String')), ...
+            'minBlobSize',    str2double(get(handles.blob,  'String')), ...
+            'startFrame',     str2double(get(handles.start, 'String')));
+        fn = fieldnames(vals);
+        if any(structfun(@(x) ~isscalar(x) || isnan(x), vals))
+            bad = fn(structfun(@(x) ~isscalar(x) || isnan(x), vals));
+            errordlg(sprintf('Ungültige Zahl im Feld: %s', strjoin(bad, ', ')), ...
+                'Fehler', 'modal');
+            return;   % Fenster offen lassen
         end
-    end
-end
-
-
-%% Lokale Funktion: Ein Video oder alle Videos verarbeiten?
-function choice = selectVideoMode()
-%SELECTVIDEOMODE  Modales Fenster mit 2 Buttons (Ein Video / Alle Videos).
-%   Rückgabe: 1 = Ein Video, 2 = Alle Videos; [] falls das Fenster ohne
-%   Auswahl geschlossen wurde.
-
-    choice = [];
-
-    hFig = figure('Name', 'Video-Modus auswählen', 'NumberTitle', 'off', ...
-        'MenuBar', 'none', 'ToolBar', 'none', 'Resize', 'off', ...
-        'Position', [500 500 300 140]);
-
-    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Ein Video oder alle Videos?', ...
-        'Units', 'normalized', 'Position', [0.05 0.65 0.9 0.25], ...
-        'FontSize', 11, 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
-
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Ein Video', ...
-        'Units', 'normalized', 'Position', [0.07 0.15 0.4 0.4], ...
-        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(1));
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'Alle Videos', ...
-        'Units', 'normalized', 'Position', [0.53 0.15 0.4 0.4], ...
-        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(2));
-
-    set(hFig, 'CloseRequestFcn', @(s,e) closeFig());
-
-    uiwait(hFig);   % blockiert, bis ein Button gedrückt / Fenster geschlossen wird
-
-    % ---------- verschachtelte Funktionen ----------
-    function setChoice(c)
-        choice = c;
-        closeFig();
+        params = struct( ...
+            'simRotationDeg', vals.simRotationDeg, ...
+            'simScale',       vals.simScale, ...
+            'simTranslation', [vals.tx, vals.ty], ...
+            'numBgFrames',    vals.numBgFrames, ...
+            'fgThreshold',    vals.fgThreshold, ...
+            'minBlobSize',    vals.minBlobSize, ...
+            'reverseVideo',   logical(get(handles.rev, 'Value')), ...
+            'startFrame',     vals.startFrame, ...
+            'previewMode',    get(handles.prev, 'Value'), ...
+            'videoMode',      get(handles.vid,  'Value'));
+        onClose();
     end
 
-    function closeFig()
-        if isvalid(hFig)
-            uiresume(hFig);
-            delete(hFig);
-        end
-    end
-end
-
-
-%% Lokale Funktion: Vorschau-Anzeige auswählen (RGB Image / BW Maske)
-function choice = selectPreviewMode()
-%SELECTPREVIEWMODE  Modales Fenster mit 2 Buttons (RGB Image / BW Maske).
-%   Legt fest, was die Live-Vorschau während des Trackings zeigt - dient zum
-%   Testen/Einstellen der Background-Subtraction-Parameter (v.a. Ordner 2).
-%   Rückgabe: 1 = RGB Image, 2 = BW Maske; [] falls ohne Auswahl geschlossen.
-
-    choice = [];
-
-    hFig = figure('Name', 'Vorschau-Anzeige auswählen', 'NumberTitle', 'off', ...
-        'MenuBar', 'none', 'ToolBar', 'none', 'Resize', 'off', ...
-        'Position', [500 500 300 140]);
-
-    uicontrol('Parent', hFig, 'Style', 'text', 'String', 'Live-Vorschau: RGB oder BW?', ...
-        'Units', 'normalized', 'Position', [0.05 0.65 0.9 0.25], ...
-        'FontSize', 11, 'FontWeight', 'bold', 'HorizontalAlignment', 'center');
-
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'RGB Image', ...
-        'Units', 'normalized', 'Position', [0.07 0.15 0.4 0.4], ...
-        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(1));
-    uicontrol('Parent', hFig, 'Style', 'pushbutton', 'String', 'BW Maske', ...
-        'Units', 'normalized', 'Position', [0.53 0.15 0.4 0.4], ...
-        'FontWeight', 'bold', 'Callback', @(s,e) setChoice(2));
-
-    set(hFig, 'CloseRequestFcn', @(s,e) closeFig());
-
-    uiwait(hFig);   % blockiert, bis ein Button gedrückt / Fenster geschlossen wird
-
-    % ---------- verschachtelte Funktionen ----------
-    function setChoice(c)
-        choice = c;
-        closeFig();
-    end
-
-    function closeFig()
+    function onClose()
         if isvalid(hFig)
             uiresume(hFig);
             delete(hFig);
